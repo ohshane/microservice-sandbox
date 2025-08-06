@@ -1,0 +1,39 @@
+services:
+  nginx:
+    image: nginx
+    ports:
+      - 80:80
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+
+  template:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        - SERVICE=template
+    env_file:
+      - .env.dev
+    ports:
+      - 8001:8000
+    volumes:
+      - ./services/template:/app
+      - ./lib:/app/lib
+
+  auth:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        - SERVICE=auth
+    env_file:
+      - .env.dev
+    ports:
+      - 8002:8000
+    volumes:
+      - ./services/auth:/app
+      - ./lib:/app/lib
+
+networks:
+  shared-net:
+    name: net

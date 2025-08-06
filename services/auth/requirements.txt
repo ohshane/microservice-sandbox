@@ -1,0 +1,8 @@
+fastapi[standard]
+
+sqlalchemy
+psycopg2-binary
+python-jose
+bcrypt
+pydantic
+redis
