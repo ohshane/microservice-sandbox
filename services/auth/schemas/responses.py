@@ -15,11 +15,9 @@ def create_model(T=None):
 
 
 def create_response(message: str, data: any = None):
-    response = None
     if data is None:
-        response = ResponseModel(message=message)
-    response = DataResponseModel(message=message, data=data)
-    return jsonable_encoder(response)
+        return jsonable_encoder(ResponseModel(message=message))
+    return jsonable_encoder(DataResponseModel(message=message, data=data))
 
 
 class ResponseModel(BaseModel):

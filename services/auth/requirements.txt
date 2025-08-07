@@ -6,3 +6,5 @@ python-jose
 bcrypt
 pydantic
 redis
+boto3
+aiokafka

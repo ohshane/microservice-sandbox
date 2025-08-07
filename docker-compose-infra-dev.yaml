@@ -101,9 +101,13 @@ services:
       - .env.dev
     volumes:
       - /var/lib/postgresql/data
+    ports:
+      - 5432:5432
 
   redis:
     image: redis
+    ports:
+      - 6379:6379
 
   s3:
     image: adobe/s3mock:3.12.0
@@ -112,11 +116,15 @@ services:
       - root=data
     volumes:
       - /data
+    ports:
+      - 9090:9090
 
   chroma:
     image: chromadb/chroma
     volumes:
       - /data
+    ports:
+      - 9100:8000
 
 networks:
   shared-net:
