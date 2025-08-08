@@ -10,9 +10,6 @@ class User(BaseModel):
     bio = Column(Text, nullable=True)
     profile_url = Column(Text, nullable=True)
 
-    login_fail_count = Column(Integer, default=0)
-    login_fail_at = Column(DateTime, nullable=True)
-
     role = Column(Text, nullable=False, default="user")
 
     sso_provider = Column(Text, nullable=True)

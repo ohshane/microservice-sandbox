@@ -2,7 +2,7 @@ import os
 
 import models as M
 import schemas.payloads as P
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from schemas.responses import create_model, create_response
@@ -10,13 +10,24 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from models.base import Base
 
-import json
-from aiokafka import AIOKafkaProducer
 from lib.infra import *
-from lib.utils import hash_password, create_event
+from lib.utils import *
+from lib.jwt import *
 from contextlib import asynccontextmanager
 
 APP_ENV = os.getenv("APP_ENV")
+
+# Jwt
+JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+JWT_REFRESH_TOKEN_EXPIRE_SECONDS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_SECONDS"))
+JWT_ACCESS_TOKEN_EXPIRE_SECONDS = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_SECONDS"))
+jwt_encoder = new_jwt_encoder(
+    jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM
+)
+jwt_decoder = new_jwt_decoder(
+    jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM
+)
 
 # Postgres
 DB_SCHEMA = os.getenv("DB_SCHEMA")
@@ -30,7 +41,7 @@ get_db = new_db(url=postgres_url)
 engine = create_engine(url=postgres_url)
 assert DB_SCHEMA
 with engine.connect() as conn:
-    conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS \"msa_{DB_SCHEMA}\";"))
+    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "msa_{DB_SCHEMA}";'))
     conn.commit()
 Base.metadata.create_all(bind=engine)
 
@@ -51,18 +62,17 @@ s3 = new_s3(
     s3_secret_key=AWS_S3_SECRET_KEY,
 )
 
-# Kafka
-KAFKA_BROKER_URL = os.getenv("KAFKA_BROKER_URL")
-producer = AIOKafkaProducer(
-    bootstrap_servers=[KAFKA_BROKER_URL],
-    value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    KAFKA_BROKER_URL = os.getenv("KAFKA_BROKER_URL")
+    producer = new_kafka_producer(bootstrap_servers=[KAFKA_BROKER_URL])
     await producer.start()
-    yield
-    await producer.stop()
+    app.state.producer = producer
+    try:
+        yield
+    finally:
+        await producer.stop()
 
 
 app = FastAPI(root_path="/api/v1/auth", lifespan=lifespan)
@@ -87,8 +97,10 @@ def healthz(db: Session = Depends(get_db)):
     return create_response(message)
 
 
-@app.post("/register", response_model=create_model(P.Token))
-async def register(body: P.RegisterUser, db: Session = Depends(get_db)):
+@app.post("/register", response_model=create_model(P.Tokens))
+async def register(
+    request: Request, body: P.AuthCredentials, db: Session = Depends(get_db)
+):
     existing_user = db.query(M.User).filter(M.User.email == body.email).first()
     if existing_user:
         return JSONResponse(create_response("Email already exists."), 409)
@@ -106,12 +118,63 @@ async def register(body: P.RegisterUser, db: Session = Depends(get_db)):
     data = user.to_dict()
 
     try:
-        await producer.send(
-            "auth.user.registered",
-            key=None,
-            value=create_event(data)
+        await request.app.state.producer.send_and_wait(
+            "auth.user.registered", key=None, value=create_event(data)
         )
     except Exception as e:
         return JSONResponse(create_response(str(e)), 500)
 
     return JSONResponse(create_response("User created.", data), 201)
+
+
+@app.post("/login", response_model=P.Tokens)
+async def login(body: P.AuthCredentials, db: Session = Depends(get_db)):
+    user = db.query(M.User).filter(M.User.email == body.email).first()
+    if user is not None and verify_password(
+        body.password, user.hashed_password
+    ):
+        user.last_login_at = now()
+        db.commit()
+        db.refresh(user)
+    else:
+        return JSONResponse(create_response("Invalid email or password.", 401))
+    refresh_token = jwt_encoder(
+        refresh_token_payload(user, JWT_REFRESH_TOKEN_EXPIRE_SECONDS)
+    )
+    access_token = jwt_encoder(
+        access_token_payload(user, JWT_ACCESS_TOKEN_EXPIRE_SECONDS)
+    )
+
+    res = JSONResponse(
+        create_response(
+            "Logged in successfully.",
+            {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+            },
+        )
+    )
+
+    res.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        # TODO: https
+        secure=False,
+        samesite="Lax",
+        max_age=JWT_ACCESS_TOKEN_EXPIRE_SECONDS,
+        path="/",
+    )
+
+    res.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        # TODO: https
+        secure=False,
+        samesite="Lax",
+        max_age=JWT_REFRESH_TOKEN_EXPIRE_SECONDS,
+        path="/refresh",
+    )
+
+    return res
