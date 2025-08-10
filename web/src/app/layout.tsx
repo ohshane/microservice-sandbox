@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Microservice sandbox",
+  title: "CakeStack",
   description: "For those passionate about microservices.",
 };
 
