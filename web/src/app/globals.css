@@ -24,8 +24,3 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
-
-/* Prevent scroll restoration on page load */
-html {
-  scroll-behavior: smooth;
-}

@@ -1,10 +1,13 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useToastContext } from '@/context/toast';
+import { ToastContainer } from '@/components/toast';
 
 export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const { toasts, addToast } = useToastContext();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -14,7 +17,7 @@ export default function Register() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-white text-black px-4">
       <div className="mx-auto w-full max-w-lg">
-        <h1 className="text-2xl font-bold text-center">Login to CakeStack</h1>
+        <h1 className="text-2xl font-bold text-center">Sign in to CakeStack</h1>
         <form
           className="mx-auto mt-6 rounded-2xl border border-black/10 bg-white/80 p-5 shadow-sm backdrop-blur"
           onSubmit={handleSubmit}
@@ -55,18 +58,24 @@ export default function Register() {
           </div>
           <button
             type="submit"
-            className="mt-5 w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            className="cursor-pointer mt-5 w-full rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
           >
-            Register
+            Sign in
           </button>
         </form>
         <div className="mt-4 text-center text-sm">
-          Already have an account?{" "}
-          <Link href="/login" className="text-blue-600 hover:underline">
-            Sign in
+          Don&apos;t have an account?{" "}
+          <Link href="/register" className="text-blue-600 hover:underline">
+            Sign up
+          </Link>
+        </div>
+        <div className="m-4 text-center text-sm">
+          <Link href="/" className="text-blue-600 hover:underline">
+            Back to Home
           </Link>
         </div>
       </div>
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }

@@ -16,11 +16,15 @@ import {
   LineChart,
   CakeSlice,
 } from "lucide-react";
-import Cherry from "../components/cherry";
+
+import Cherry from "@/components/cherry";
+import { useToastContext } from '@/context/toast';
+import { ToastContainer } from '@/components/toast';
 
 export default function Landing() {
   // Light theme only; dark toggle removed
   const [open, setOpen] = useState(false);
+  const { toasts } = useToastContext();
   const isLight = true;
 
   // Ensure page starts at top on initial load
@@ -37,6 +41,7 @@ export default function Landing() {
     { name: "Features", href: "#features" },
     { name: "Architecture", href: "#architecture" },
     { name: "Get started", href: "#cli" },
+    { name: "Sign up", href: "/register" },
   ];
 
   return (
@@ -52,7 +57,7 @@ export default function Landing() {
       {/* Nav */}
       <header className={`sticky top-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-white/40`}>
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-6">
-          <a href="#" className="flex items-center gap-2">
+          <a href="" className="flex items-center gap-2">
             <div className={`grid h-8 w-8 place-items-center rounded-lg bg-black text-white`}>
               <CakeSlice className="h-5 w-5" />
             </div>
@@ -97,8 +102,8 @@ export default function Landing() {
                   </a>
                 ))}
                 <div className="flex gap-3 pt-2">
-                  <a href="#get-started" className={`flex-1 text-center text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 text-sm font-medium transition border`}>Get Started</a>
-                  <a href="https://github.com/ohshane/microservice-sandbox" target="_blank" rel="noreferrer" className={`flex flex-1 items-center justify-center gap-2 bg-black text-white hover:opacity-90 rounded-xl px-4 py-2 text-sm font-semibold inline-flex items-center gap-2`}>
+                  <a href="#get-started" className={`flex-1 text-center text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}>Get Started</a>
+                  <a href="https://github.com/ohshane/microservice-sandbox" target="_blank" rel="noreferrer" className={`flex flex-1 items-center justify-center gap-2 bg-black text-white hover:opacity-90 rounded-xl px-4 py-2 text-sm font-semibold`}>
                     <Github className="h-4 w-4" /> GitHub
                   </a>
                 </div>
@@ -325,6 +330,7 @@ networks:
         </div>
       </footer>
       <Cherry />
+      <ToastContainer toasts={toasts} />
     </div>
   );
 }

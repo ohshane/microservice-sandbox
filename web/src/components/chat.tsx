@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from 'react-markdown';
 import { v4 as uuidv4 } from 'uuid';
+import { API_URL } from '@/config';
 
 interface Message {
   id: string;
@@ -11,8 +12,6 @@ interface Message {
   content: string;
 }
 type Role = Message["role"];
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
@@ -55,7 +54,6 @@ export default function Chat() {
     try {
       // Build payload using current messages plus the new user message
       const prevMsgs = [...messages, userMsg].slice(1);
-      console.log(prevMsgs);
 
       const res = await fetch(`${API_URL}/api/v1/conversation`, {
         method: "POST",

@@ -112,9 +112,13 @@ async def register(
         is_active=True,
         change_password_on_next_login=False,
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+
+    from lib.utils import log
+    log(user.to_dict())
+
+    # db.add(user)
+    # db.commit()
+    # db.refresh(user)
     data = user.to_dict()
 
     try:
@@ -124,7 +128,7 @@ async def register(
     except Exception as e:
         return JSONResponse(create_response(str(e)), 500)
 
-    return JSONResponse(create_response("User created.", data), 201)
+    return JSONResponse(create_response("User registered."), 201)
 
 
 @app.post("/login", response_model=P.Tokens)
