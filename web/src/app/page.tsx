@@ -300,7 +300,7 @@ networks:
               </div>
               <span className="text-lg font-semibold tracking-tight">CakeStack</span>
             </div>
-            <p className={`mt-3 text-sm text-black/60`}>Open source starter for modern, event-driven microservices.</p>
+            <p className={`mt-3 text-sm text-black/60`}>Build microservices, with no pain.</p>
           </div>
           <div className="grid grid-cols-2 gap-6 text-sm">
             <div className="space-y-2">
@@ -316,7 +316,7 @@ networks:
             </div>
           </div>
           <div className={`flex items-end justify-between text-sm text-black/60 md:items-center`}>
-            <div>© {new Date().getFullYear()} Microservice Sandbox</div>
+            <div>&copy; {new Date().getFullYear()} CakeStack</div>
             <div className="space-x-4">
               <a href="#terms" className={`hover:opacity-80`}>Terms</a>
               <a href="#privacy" className={`hover:opacity-80`}>Privacy</a>

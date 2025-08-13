@@ -1,130 +1,167 @@
-
-
+// POST-streaming implementation, parses text/event-stream from fetch(POST)
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Markdown from 'react-markdown';
+import { v4 as uuidv4 } from 'uuid';
 
-export type Role = "system" | "user" | "assistant" | "tool";
-
-export interface Message {
+interface Message {
   id: string;
-  role: Role;
+  role: "developer" | "user" | "assistant";
   content: string;
 }
+type Role = Message["role"];
 
-export interface ChatProps {
-  /** HTTP endpoint that accepts { messages, model?, system?, stream?: true } and returns a streamed text body */
-  endpoint?: string;
-  /** Optional static headers (e.g., Authorization) */
-  headers?: Record<string, string>;
-  /** Model hint passed to the endpoint */
-  model?: string;
-  /** System prompt prepended to the conversation */
-  system?: string;
-  /** Initial messages to seed the chat */
-  initialMessages?: Message[];
-  /** ClassName for outer container */
-  className?: string;
-}
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-/**
- * Minimal, framework-agnostic LLM chat component with streaming support.
- *
- * Backend contract (simple): POST endpoint with JSON body
- *   { messages: Message[], model?: string, system?: string, stream?: true }
- * Should respond with streamed UTF-8 text (incremental tokens). If your server uses
- * Server-Sent Events, adapt the reader to parse `data:` lines.
- */
-export default function Chat({
-  endpoint = "/api/chat",
-  headers,
-  model,
-  system,
-  initialMessages = [],
-  className,
-}: ChatProps) {
-  const [messages, setMessages] = useState<Message[]>(() => initialMessages);
+export default function Chat() {
+  const [messages, setMessages] = useState<Message[]>([
+    { id: "", role: "assistant", content: "Hi there! How can I assist you today?" },
+  ]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [controller, setController] = useState<AbortController | null>(null);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const canSend = useMemo(() => input.trim().length > 0 && !pending, [input, pending]);
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, pending]);
 
-  async function handleSend() {
-    const text = input.trim();
-    if (!text || pending) return;
-
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
-    const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: "" };
-
-    const body: any = {
-      messages: [
-        ...(system ? [{ id: "system", role: "system", content: system } as Message] : []),
-        ...messages,
-        userMsg,
-      ],
-      model,
-      stream: true,
-    };
-
-    setMessages((m) => [...m, userMsg, assistantMsg]);
-    setInput("");
-    setPending(true);
-
-    const ctrl = new AbortController();
-    setController(ctrl);
-
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(headers || {}),
-        },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let done = false;
-
-      while (!done) {
-        const chunk = await reader.read();
-        done = chunk.done || false;
-        const text = decoder.decode(chunk.value || new Uint8Array(), { stream: !done });
-        if (text) {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMsg.id ? { ...m, content: m.content + text } : m))
-          );
-        }
-      }
-    } catch (err) {
-      console.error("chat error", err);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.role === "assistant" && m.content === "" ? { ...m, content: "⚠️ Generation stopped." } : m
-        )
-      );
-    } finally {
-      setPending(false);
-      setController(null);
+  useEffect(() => {
+    if (!localStorage.getItem("cs-conversationid")) {
+      localStorage.setItem("cs-conversationid", uuidv4());
     }
-  }
+  }, []);
 
   function handleStop() {
     controller?.abort();
+    setPending(false);
+    setController(null);
+  }
+
+  async function sendMessage(content: string) {
+    if (!content.trim()) return;
+
+    const userMsg: Message = { id: uuidv4(), role: "user", content };
+    setMessages((prev) => [...prev, userMsg]);
+
+    const ac = new AbortController();
+    setController(ac);
+    setPending(true);
+
+    try {
+      // Build payload using current messages plus the new user message
+      const prevMsgs = [...messages, userMsg].slice(1);
+      console.log(prevMsgs);
+
+      const res = await fetch(`${API_URL}/api/v1/conversation`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+        },
+        body: JSON.stringify({
+          conversation_id: localStorage.getItem("cs-conversationid"),
+          messages: prevMsgs,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
+        }),
+        signal: ac.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        console.error("Streaming response not ok/body missing", res.status, res.statusText);
+        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";            // accumulates raw text chunks
+      let eventData = "";         // accumulates multi-line "data:" fields for one SSE event
+
+      const flushEvent = () => {
+        const payload = eventData.trim();
+        eventData = "";
+        if (!payload) return;
+
+        if (payload === "[DONE]") {
+          setPending(false);
+          return "DONE";
+        }
+
+        try {
+          const obj = JSON.parse(payload);
+          const delta =
+            obj?.choices?.[0]?.delta?.content ??
+            obj?.delta?.content ??
+            obj?.content ??
+            "";
+
+          if (typeof delta === "string" && delta.length) {
+            setMessages((prev) => {
+              const exists = prev.some((m) => m.id === obj.id);
+              if (!exists) {
+                return [...prev, { id: obj.id, role: "assistant", content: delta }];
+              }
+              return prev.map((m) =>
+                m.id === obj.id ? { ...m, content: m.content + delta } : m
+              );
+            });
+            // ensure the typing indicator stops as soon as we get the first token
+            setPending(false);
+          }
+        } catch {}
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
+
+        buffer += chunk;
+
+        // Extract lines from buffer
+        while (true) {
+          const nlIndex = buffer.indexOf("\n");
+          if (nlIndex === -1) break;
+
+          // Take one line (trim trailing CR)
+          let line = buffer.slice(0, nlIndex);
+          buffer = buffer.slice(nlIndex + 1);
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+
+          if (line === "") {
+            // Blank line = end of one SSE event
+            const status = flushEvent();
+            if (status === "DONE") {
+              break;
+            }
+            continue;
+          }
+
+          // Parse SSE fields: data:, event:, id:, retry:
+          if (line.startsWith("data:")) {
+            // "data:" plus optional space
+            const v = line.length >= 5 ? line.slice(5).trimStart() : "";
+            // Accumulate (SSE allows multi-line data fields)
+            eventData += (eventData ? "\n" : "") + v;
+          }
+          // We ignore "event:", "id:", "retry:" for now — extend if needed
+        }
+      }
+    } catch (err) {
+      console.error("streaming error:", err);
+    } finally {
+      setController(null);
+      setInput("");
+    }
   }
 
   return (
-    <div className={clsx("flex h-full w-full flex-col", className)}>
+    <div className="flex h-full w-full flex-col">
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
@@ -137,7 +174,7 @@ export default function Chat({
         ))}
         {pending && (
           <Bubble role="assistant">
-            <span className="inline-flex items-center gap-2">
+            <span className="inline-flex items-center gap-1">
               <Dot />
               <Dot />
               <Dot />
@@ -151,21 +188,22 @@ export default function Chat({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            handleSend();
+            sendMessage(input);
           }}
           className="flex items-end gap-2"
         >
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Message Cherry..."
+            placeholder="Ask Cherry..."
             className="min-h-[44px] max-h-40 flex-1 resize-y rounded-xl border border-black/10 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20 dark:border-white/10 dark:focus:ring-white/20"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                handleSend();
+                sendMessage(input);
               }
             }}
+            disabled={pending}
           />
           {!pending ? (
             <button
@@ -192,26 +230,22 @@ export default function Chat({
 
 function Bubble({ role, children }: { role: Role; children: React.ReactNode }) {
   const isUser = role === "user";
-  const isAssistant = role === "assistant";
-  const tone = isUser ? "bg-rose-400 text-white" : "bg-black/5 dark:bg-white/10";
-  const align = isUser ? "justify-end" : "justify-start"; // right for user, left for model
-  const avatar = isUser ? "U" : isAssistant ? "C" : role[0]?.toUpperCase();
+  const bg = isUser ? "bg-rose-400 text-white" : "bg-black/5 dark:bg-white/10";
+  const align = isUser ? "justify-end" : "justify-start";
   return (
     <div className={`flex ${align}`}>
-      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${tone}`}>
-        {children}
-      </div>
-      <div className="sr-only" aria-hidden>
-        {avatar}
+      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${bg}`}>
+        { typeof children === 'string' ? (<Markdown>{children}</Markdown>) : children }
       </div>
     </div>
   );
 }
 
 function Dot() {
-  return <span className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-duration:900ms]" />;
-}
-
-function clsx(...xs: Array<string | undefined | null | false>) {
-  return xs.filter(Boolean).join(" ");
+  return (
+    <span
+      className="inline-block h-1 w-1 animate-bounce rounded-full bg-current opacity-80 shadow-sm [animation-duration:800ms]"
+      style={{ transformOrigin: "center" }}
+    />
+  );
 }

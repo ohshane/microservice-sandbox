@@ -1,5 +1,3 @@
-
-
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
@@ -28,7 +26,7 @@ export default function Cherry() {
       <button
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full bg-rose-400 px-4 py-3 text-sm font-medium text-white shadow-lg transition hover:opacity-90 active:scale-95 dark:bg-rose-400 dark:text-white"
+        className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full bg-rose-400 px-4 py-3 text-sm font-medium text-white shadow-lg transition hover:opacity-90 active:scale-95 dark:bg-rose-400 dark:text-white cursor-pointer"
         aria-expanded={open}
         aria-controls="cherry-chat"
       >
@@ -41,11 +39,11 @@ export default function Cherry() {
       {open && (
         <div
           id="cherry-chat"
-          className="fixed bottom-20 right-4 z-50 h-[60vh] w-[min(92vw,420px)] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-black"
+          className="fixed bottom-20 right-4 z-50 h-[60vh] w-[min(92vw,420px)] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl"
           role="dialog"
           aria-label="Cherry chat"
         >
-          <Chat className="h-full" />
+          <Chat />
         </div>
       )}
     </>
