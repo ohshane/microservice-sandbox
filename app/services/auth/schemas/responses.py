@@ -14,7 +14,7 @@ def create_model(T=None):
     return DataResponseModel[T]
 
 
-def create_response(message: str, data: any = None):
+def create_response(message: str, data: any = None) -> dict:
     if data is None:
         return jsonable_encoder(ResponseModel(message=message))
     return jsonable_encoder(DataResponseModel(message=message, data=data))

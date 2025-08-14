@@ -20,11 +20,14 @@ import {
 import Cherry from "@/components/cherry";
 import { useToastContext } from '@/context/toast';
 import { ToastContainer } from '@/components/toast';
+import { useAuthContext } from '@/context/auth';
+import Link from 'next/link';
 
 export default function Landing() {
   // Light theme only; dark toggle removed
   const [open, setOpen] = useState(false);
-  const { toasts } = useToastContext();
+  const { toasts, addToast } = useToastContext();
+  const { auth, setAuth } = useAuthContext();
   const isLight = true;
 
   // Ensure page starts at top on initial load
@@ -41,7 +44,6 @@ export default function Landing() {
     { name: "Features", href: "#features" },
     { name: "Architecture", href: "#architecture" },
     { name: "Get started", href: "#cli" },
-    { name: "Sign up", href: "/register" },
   ];
 
   return (
@@ -70,6 +72,26 @@ export default function Landing() {
                 {n.name}
               </a>
             ))}
+
+            {auth ? (
+              <button
+                onClick={() => {
+                  setAuth(null);
+                  addToast({ type: "success", content: "Logged out successfully!" });
+                }}
+                className={`cursor-pointer text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
+              >
+                Log out
+              </button>
+            ) : (
+              <Link
+                href="/login"
+                className={`cursor-pointer text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
+              >
+                Log in
+              </Link>
+            )}
+
             <a href="https://github.com/ohshane/microservice-sandbox" target="_blank" rel="noreferrer" className={`bg-black text-white hover:opacity-90 rounded-xl px-4 py-2 text-sm font-semibold inline-flex items-center gap-2`}>
               <Github className="h-4 w-4" />GitHub
             </a>
@@ -78,7 +100,7 @@ export default function Landing() {
           {/* Mobile */}
           <div className="flex items-center gap-2 md:hidden">
             <button
-              className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border border-black/15`}
+              className={`cursor-pointer inline-flex h-10 w-10 items-center justify-center rounded-xl border border-black/15`}
               onClick={() => setOpen((v) => !v)}
               aria-label="Toggle menu"
             >
@@ -102,7 +124,24 @@ export default function Landing() {
                   </a>
                 ))}
                 <div className="flex gap-3 pt-2">
-                  <a href="#get-started" className={`flex-1 text-center text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}>Get Started</a>
+                    {auth ? (
+                    <button
+                      onClick={() => {
+                        setAuth(null)
+                        addToast({ type: "success", content: "Logged out successfully!" });
+                      }}
+                      className={`cursor-pointer flex-1 text-center text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
+                    >
+                      Log out
+                    </button>
+                    ) : (
+                    <Link
+                      href="/login"
+                      className={`cursor-pointer flex-1 text-center text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
+                    >
+                      Log in
+                    </Link>
+                    )}
                   <a href="https://github.com/ohshane/microservice-sandbox" target="_blank" rel="noreferrer" className={`flex flex-1 items-center justify-center gap-2 bg-black text-white hover:opacity-90 rounded-xl px-4 py-2 text-sm font-semibold`}>
                     <Github className="h-4 w-4" /> GitHub
                   </a>
@@ -342,7 +381,7 @@ networks:
  */
 function RollingWords({
   words,
-  interval = 2500,
+  interval = 5000,
   className = "",
 }: {
   words: string[];

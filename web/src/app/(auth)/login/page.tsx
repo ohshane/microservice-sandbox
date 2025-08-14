@@ -3,15 +3,52 @@ import { useState } from "react";
 import Link from "next/link";
 import { useToastContext } from '@/context/toast';
 import { ToastContainer } from '@/components/toast';
+import { API_URL } from "@/config";
+import { useRouter } from 'next/navigation';
+import { useAuthContext } from '@/context/auth';
 
-export default function Register() {
+export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const { toasts, addToast } = useToastContext();
+  const { auth, setAuth } = useAuthContext();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const router = useRouter();
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Registration logic placeholder
+
+    const loginResponse = await fetch(`${API_URL}/api/v1/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (loginResponse.status === 200) {
+      ;
+    } else if (loginResponse.status === 401) {
+      addToast({ type: "error", content: "Please check your email or password." });
+    }
+
+    const meResponse = await fetch(`${API_URL}/api/v1/auth/me`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        // "Authorization": `Bearer ${data.access_token}`,
+      },
+      credentials: "include",
+    });
+    
+    if (meResponse.status === 200) {
+      addToast({ type: "success", content: "Logged in successfully!" });
+      router.replace("/");
+    }
+
+    setAuth(await meResponse.json());
+
   };
 
   return (
@@ -53,7 +90,7 @@ export default function Register() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              autoComplete="new-password"
+              autoComplete="password"
             />
           </div>
           <button

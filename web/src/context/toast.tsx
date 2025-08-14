@@ -45,7 +45,7 @@ export function useToast(): [
     const popTimeout = setTimeout(() => {
       setToasts((prev) => prev.filter((m) => m.id !== id));
       clearTimeout(popTimeout);
-    }, duration + 500);
+    }, duration + 5000);
   }
 
   return [toasts, addToast];
