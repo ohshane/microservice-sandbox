@@ -1,8 +1,10 @@
 "use client"
 
-import React, { createContext, useContext } from "react";
+import { auth as authservice } from '@/services';
+import React, { createContext, useContext, useEffect, useState } from "react";
+import { useRouter } from 'next/navigation';
 
-export interface Me {
+export interface User {
   email: string;
   username: string;
   name: string;
@@ -15,8 +17,8 @@ export interface Me {
 }
 
 export interface AuthContextType {
-  auth: Me | null;
-  setAuth: React.Dispatch<React.SetStateAction<Me | null>>;
+  auth: User | null
+  setAuth: (user: User | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,7 +32,30 @@ export function useAuthContext(): AuthContextType {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [auth, setAuth] = React.useState<Me | null>(null);
+  const [auth, setAuth] = useState<User | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    (async () => {
+      let res = await authservice.me();
+      if (res.status === 200) {
+        setAuth(await res.json());
+        return;
+      }
+
+      res = await authservice.refresh();
+      if (res.status !== 200) {
+        setAuth(null)
+        return;
+      }
+
+      res = await authservice.me();
+      if (res.status === 200) {
+        setAuth(await res.json());
+        return;
+      }
+    })();
+  }, [router]);
 
   return <AuthContext.Provider value={{ auth, setAuth }}>{children}</AuthContext.Provider>;
 }

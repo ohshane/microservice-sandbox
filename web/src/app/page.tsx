@@ -22,13 +22,13 @@ import { useToastContext } from '@/context/toast';
 import { ToastContainer } from '@/components/toast';
 import { useAuthContext } from '@/context/auth';
 import Link from 'next/link';
+import LoginButton from '@/components/auth';
 
 export default function Landing() {
   // Light theme only; dark toggle removed
   const [open, setOpen] = useState(false);
   const { toasts, addToast } = useToastContext();
   const { auth, setAuth } = useAuthContext();
-  const isLight = true;
 
   // Ensure page starts at top on initial load
   useEffect(() => {
@@ -38,7 +38,6 @@ export default function Landing() {
       window.scrollTo(0, 0);
     }
   }, []);
-
 
   const nav = [
     { name: "Features", href: "#features" },
@@ -73,24 +72,7 @@ export default function Landing() {
               </a>
             ))}
 
-            {auth ? (
-              <button
-                onClick={() => {
-                  setAuth(null);
-                  addToast({ type: "success", content: "Logged out successfully!" });
-                }}
-                className={`cursor-pointer text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
-              >
-                Log out
-              </button>
-            ) : (
-              <Link
-                href="/login"
-                className={`cursor-pointer text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
-              >
-                Log in
-              </Link>
-            )}
+            <LoginButton />
 
             <a href="https://github.com/ohshane/microservice-sandbox" target="_blank" rel="noreferrer" className={`bg-black text-white hover:opacity-90 rounded-xl px-4 py-2 text-sm font-semibold inline-flex items-center gap-2`}>
               <Github className="h-4 w-4" />GitHub
@@ -124,24 +106,7 @@ export default function Landing() {
                   </a>
                 ))}
                 <div className="flex gap-3 pt-2">
-                    {auth ? (
-                    <button
-                      onClick={() => {
-                        setAuth(null)
-                        addToast({ type: "success", content: "Logged out successfully!" });
-                      }}
-                      className={`cursor-pointer flex-1 text-center text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
-                    >
-                      Log out
-                    </button>
-                    ) : (
-                    <Link
-                      href="/login"
-                      className={`cursor-pointer flex-1 text-center text-sm border-black/20 hover:border-black/40 hover:bg-black/5 rounded-xl px-4 py-2 font-medium transition border`}
-                    >
-                      Log in
-                    </Link>
-                    )}
+                  <LoginButton />
                   <a href="https://github.com/ohshane/microservice-sandbox" target="_blank" rel="noreferrer" className={`flex flex-1 items-center justify-center gap-2 bg-black text-white hover:opacity-90 rounded-xl px-4 py-2 text-sm font-semibold`}>
                     <Github className="h-4 w-4" /> GitHub
                   </a>
@@ -260,12 +225,12 @@ networks:
         </div>
 
         <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Feature icon={Boxes} title="Monorepo, done right" desc="Turbo-powered tooling, workspaces, and shared libs with strict typing & linting." isLight={isLight} />
-          <Feature icon={Network} title="CQRS + Kafka" desc="Event-driven boundaries, idempotent consumers, and durable outbox patterns." isLight={isLight} />
-          <Feature icon={ShieldCheck} title="Multi-tenant Auth" desc="AuthN/AuthZ split, JWT + PDP, tenant-aware policies, and audit trails." isLight={isLight} />
-          <Feature icon={Cloud} title="Kubernetes-ready" desc="GitOps manifests, health probes, HPA, and zero-downtime rollouts." isLight={isLight} />
-          <Feature icon={TerminalSquare} title="DX-first CLI" desc="Spin up services, seed data, and tail logs with a single command." isLight={isLight} />
-          <Feature icon={LineChart} title="Observability" desc="OpenTelemetry traces, metrics, structured logs, and golden signals." isLight={isLight} />
+          <Feature icon={Boxes} title="Monorepo, done right" desc="Turbo-powered tooling, workspaces, and shared libs with strict typing & linting." />
+          <Feature icon={Network} title="CQRS + Kafka" desc="Event-driven boundaries, idempotent consumers, and durable outbox patterns." />
+          <Feature icon={ShieldCheck} title="Multi-tenant Auth" desc="AuthN/AuthZ split, JWT + PDP, tenant-aware policies, and audit trails." />
+          <Feature icon={Cloud} title="Kubernetes-ready" desc="GitOps manifests, health probes, HPA, and zero-downtime rollouts." />
+          <Feature icon={TerminalSquare} title="DX-first CLI" desc="Spin up services, seed data, and tail logs with a single command." />
+          <Feature icon={LineChart} title="Observability" desc="OpenTelemetry traces, metrics, structured logs, and golden signals." />
         </div>
       </section>
 
@@ -295,7 +260,7 @@ networks:
           </div>
 
           <div className="order-1 md:order-2">
-            <ArchDiagram isLight={isLight} />
+            <ArchDiagram />
           </div>
         </div>
       </section>
@@ -416,20 +381,20 @@ function RollingWords({
   );
 }
 
-function Feature({ icon: Icon, title, desc, isLight }: { icon: any; title: string; desc: string; isLight: boolean }) {
+function Feature({ icon: Icon, title, desc }: { icon: any; title: string; desc: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.3 }}
       transition={{ duration: 0.5 }}
-      className={`relative overflow-hidden rounded-2xl border ${isLight ? "border-black/10 bg-black/[0.03]" : "border-white/10 bg-white/[0.03]"} p-5`}
+      className={`relative overflow-hidden rounded-2xl border border-black/10 bg-black/[0.03] p-5`}
     >
-      <div className={`mb-3 inline-flex rounded-xl border ${isLight ? "border-black/10 bg-black/10" : "border-white/10 bg-white/10"} p-2`}>
+      <div className="mb-3 inline-flex rounded-xl border border-black/10 bg-black/10">
         <Icon className="h-5 w-5" />
       </div>
       <h3 className="text-lg font-semibold">{title}</h3>
-      <p className={`mt-1 text-sm ${isLight ? "text-black/70" : "text-white/70"}`}>{desc}</p>
+      <p className="mt-1 text-sm text-black/70">{desc}</p>
     </motion.div>
   );
 }
@@ -454,24 +419,22 @@ function GridBackdrop({ stroke, fadeTop, fadeBottom }: { stroke: string; fadeTop
   );
 }
 
-function ArchDiagram({ isLight }: { isLight: boolean }) {
-  const border = isLight ? "border-black/10" : "border-white/10";
-  const tile = isLight ? "bg-black/[0.03]" : "bg-white/[0.03]";
+function ArchDiagram() {
   return (
-    <div className={`relative rounded-2xl border ${border} ${isLight ? "bg-black/5" : "bg-black/40"} p-4`}>
+    <div className={`relative rounded-2xl border border-black/10 bg-black/5 p-4`}>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-2">
-        <Block title="Infra" icon={Cloud} items={["Postgres", "Kafka", "Redis"]} border={border} tile={tile} />
-        <Block title="Directory" icon={Network} items={["Tenants", "Orgs", "Roles"]} border={border} tile={tile} />
-        <Block title="AuthN" icon={ShieldCheck} items={["Login", "Tokens", "Refresh"]} border={border} tile={tile} />
-        <Block title="AuthZ (PDP)" icon={ShieldCheck} items={["Policies", "ABAC", "Audit"]} border={border} tile={tile} />
+        <Block title="Infra" icon={Cloud} items={["Postgres", "Kafka", "Redis"]} />
+        <Block title="Directory" icon={Network} items={["Tenants", "Orgs", "Roles"]} />
+        <Block title="AuthN" icon={ShieldCheck} items={["Login", "Tokens", "Refresh"]} />
+        <Block title="AuthZ (PDP)" icon={ShieldCheck} items={["Policies", "ABAC", "Audit"]} />
       </div>
     </div>
   );
 }
 
-function Block({ title, icon: Icon, items, border, tile }: { title: string; icon: any; items: string[]; border: string; tile: string }) {
+function Block({ title, icon: Icon, items }: { title: string; icon: any; items: string[] }) {
   return (
-    <div className={`rounded-xl border ${border} ${tile} p-4`}>
+    <div className={`rounded-xl border border-black/10 bg-black/[0.03] p-4`}>
       <div className="mb-2 flex items-center gap-2">
         <div className="inline-grid h-9 w-9 place-items-center rounded-lg bg-white/10">
           <Icon className="h-5 w-5" />

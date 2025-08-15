@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from models.base import Base
 
-from lib.middleware import get_token
+from lib.middleware import get_tokens
 from lib.infra import *
 from lib.utils import *
 from lib.jwt import *
@@ -23,13 +23,6 @@ APP_ENV = os.getenv("APP_ENV")
 logging.basicConfig(level=logging.DEBUG if APP_ENV == "dev" else logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Jwt
-JWT_SECRET = os.getenv("JWT_SECRET")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
-JWT_REFRESH_TOKEN_EXPIRE_SECONDS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_SECONDS"))
-JWT_ACCESS_TOKEN_EXPIRE_SECONDS = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_SECONDS"))
-jwt_encoder = new_jwt_encoder(jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM)
-jwt_decoder = new_jwt_decoder(jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM)
 
 # Superuser credentials
 SU_EMAIL = os.getenv("SU_EMAIL")
@@ -82,6 +75,9 @@ s3 = new_s3(
     s3_secret_key=AWS_S3_SECRET_KEY,
 )
 
+# Jwt
+jwt = JWTManager(redis=redis)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -127,7 +123,7 @@ async def register(
 
     username = ""
     while True:
-        username = get_random_name() + str(random.randint(1000, 9999))
+        username = get_random_name() + "_" + str(random.randint(1000, 9999))
         if db.query(M.User).filter(M.User.username == username).first() is None:
             break
 
@@ -167,121 +163,118 @@ async def login(body: P.AuthCredentials, db: Session = Depends(get_db)):
     else:
         return JSONResponse(create_response("Invalid email or password."), 401)
 
-    refresh_token = jwt_encoder(
-        refresh_token_payload(user, JWT_REFRESH_TOKEN_EXPIRE_SECONDS)
-    )
-
-    access_token = jwt_encoder(
-        access_token_payload(user, JWT_ACCESS_TOKEN_EXPIRE_SECONDS)
-    )
+    tokens = jwt.claim_tokens(sub=user.id)
 
     res = JSONResponse(
-        create_response(
-            "Logged in successfully.",
-            {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-            },
-        ),
+        create_response("Logged in successfully.", tokens),
         200,
     )
 
     res.set_cookie(
         key="access_token",
-        value=access_token,
+        value=tokens.get("access_token"),
         httponly=True,
         # TODO: https
-        secure=False,
-        samesite="Lax",
-        max_age=JWT_ACCESS_TOKEN_EXPIRE_SECONDS,
-        path="/api",
+        secure=True,
+        samesite="None",
+        max_age=jwt.access_token_ttl,
+        path="/",
     )
 
     res.set_cookie(
         key="refresh_token",
-        value=refresh_token,
+        value=tokens.get("refresh_token"),
         httponly=True,
         # TODO: https
-        secure=False,
-        samesite="Lax",
-        max_age=JWT_REFRESH_TOKEN_EXPIRE_SECONDS,
+        secure=True,
+        samesite="None",
+        max_age=jwt.refresh_token_ttl,
         path="/api/v1/auth/refresh",
     )
 
     return res
 
 
-def verify_token(redis, token: str, *args, **kwargs) -> dict:
-    try:
-        payload = jwt_decoder(token, *args, **kwargs)
-    except:
-        raise HTTPException(status_code=401, detail="Token is invalid.1")
-
-    if redis.exists(f"bl:{payload.get("jti")}"):
-        raise HTTPException(status_code=401, detail="Token is invalid.2")
-
-    if payload.get("exp") < int(now().timestamp()):
-        raise HTTPException(status_code=401, detail="Token is invalid.3")
-
-    return payload
-
-
-def blacklist_token(redis, payload: dict) -> None:
-    exp = payload.get("exp")
-    ttl = exp - int(now().timestamp())
-    redis.setex(f"bl:{payload.get("jti")}", ttl, "blacklisted")
-
-
 @app.post("/logout", response_model=P.AccessToken)
-async def logout(access_token: str = Depends(get_token)):
-    payload = verify_token(redis, access_token)
-    blacklist_token(redis, payload)
+async def logout(tokens: dict = Depends(get_tokens)):
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    try:
+        payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+    except Exception as e:
+        raise e
 
+    jwt.blacklist(payload.sid)
     res = JSONResponse(create_response("Logged out successfully."), 200)
-    res.delete_cookie("access_token", path="/api")
+    res.set_cookie(
+        key="access_token",
+        value="",
+        httponly=True,
+        # TODO: https
+        secure=True,
+        samesite="None",
+        max_age=0,
+        path="/",
+    )
+
+    res.set_cookie(
+        key="refresh_token",
+        value="",
+        httponly=True,
+        # TODO: https
+        secure=True,
+        samesite="None",
+        max_age=0,
+        path="/api/v1/auth/refresh",
+    )
     return res
 
 
 @app.post("/refresh", response_model=P.AccessToken)
-async def refresh(
-    refresh_token: str = Depends(get_token), db: Session = Depends(get_db)
-):
-    payload = verify_token(redis, refresh_token)
-
-    user = db.query(M.User).filter(M.User.id == payload.get("sub")).first()
-    if not user:
-        return JSONResponse(create_response("User not found."), 404)
-
-    access_token = jwt_encoder(
-        access_token_payload(user, JWT_ACCESS_TOKEN_EXPIRE_SECONDS)
+async def refresh(tokens: dict = Depends(get_tokens), db: Session = Depends(get_db)):
+    token = tokens.get("refresh_token") or tokens.get("bearer_token") or None
+    refreshed_tokens = jwt.rotate_tokens(
+        refresh_token=token, iss="auth.service", aud="service"
     )
 
     res = JSONResponse(
-        create_response("Access token refreshed.", {"access_token": access_token}),
+        create_response("Refreshed tokens successfully.", refreshed_tokens),
         200,
     )
 
     res.set_cookie(
         key="access_token",
-        value=access_token,
+        value=refreshed_tokens.get("access_token"),
         httponly=True,
         # TODO: https
-        secure=False,
-        samesite="Lax",
-        max_age=JWT_ACCESS_TOKEN_EXPIRE_SECONDS,
-        path="/api",
+        secure=True,
+        samesite="None",
+        max_age=jwt.access_token_ttl,
+        path="/",
+    )
+
+    res.set_cookie(
+        key="refresh_token",
+        value=refreshed_tokens.get("refresh_token"),
+        httponly=True,
+        # TODO: https
+        secure=True,
+        samesite="None",
+        max_age=jwt.refresh_token_ttl,
+        path="/api/v1/auth/refresh",
     )
 
     return res
 
 
 @app.get("/me", response_model=P.Me)
-async def me(access_token: str = Depends(get_token), db: Session = Depends(get_db)):
-    payload = verify_token(
-        redis, access_token, audience="service", issuer="auth.service"
-    )
+async def me(tokens: str = Depends(get_tokens), db: Session = Depends(get_db)):
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    if not token:
+        return JSONResponse(create_response("Token is required."), 401)
 
-    user = db.query(M.User).filter(M.User.id == payload.get("sub")).first()
+    payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+
+    user = db.query(M.User).filter(M.User.id == payload.sub).first()
     if not user:
         return JSONResponse(create_response("User not found."), 404)
 

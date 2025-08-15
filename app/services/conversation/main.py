@@ -19,16 +19,6 @@ from contextlib import asynccontextmanager
 APP_ENV = os.getenv("APP_ENV")
 
 # Jwt
-JWT_SECRET = os.getenv("JWT_SECRET")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
-JWT_REFRESH_TOKEN_EXPIRE_SECONDS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_SECONDS"))
-JWT_ACCESS_TOKEN_EXPIRE_SECONDS = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_SECONDS"))
-jwt_encoder = new_jwt_encoder(
-    jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM
-)
-jwt_decoder = new_jwt_decoder(
-    jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM
-)
 
 # Postgres
 DB_SCHEMA = os.getenv("DB_SCHEMA")
