@@ -27,7 +27,7 @@ export default function Login() {
         addToast({ type: "error", content: "Invalid email or password." });
         return;
       }
-      setAuth(await res.json());
+      setAuth((await res.json()).data);
       addToast({ type: "success", content: "Logged in successfully!" });
       router.replace(redirectTo);
     } catch {

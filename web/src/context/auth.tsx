@@ -1,8 +1,7 @@
 "use client"
 
-import { auth as authservice } from '@/services';
+import { getMe, refresh } from '@/services/auth';
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { useRouter } from 'next/navigation';
 
 export interface User {
   email: string;
@@ -19,6 +18,7 @@ export interface User {
 export interface AuthContextType {
   auth: User | null
   setAuth: (user: User | null) => void;
+  authLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,29 +33,33 @@ export function useAuthContext(): AuthContextType {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [auth, setAuth] = useState<User | null>(null);
-  const router = useRouter();
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
 
   useEffect(() => {
     (async () => {
-      let res = await authservice.me();
-      if (res.status === 200) {
-        setAuth(await res.json());
-        return;
-      }
+      try {
+        let res = await getMe();
+        if (res.status === 200) {
+          setAuth((await res.json()).data);
+          return;
+        }
 
-      res = await authservice.refresh();
-      if (res.status !== 200) {
-        setAuth(null)
-        return;
-      }
+        res = await refresh();
+        if (res.status !== 200) {
+          setAuth(null)
+          return;
+        }
 
-      res = await authservice.me();
-      if (res.status === 200) {
-        setAuth(await res.json());
-        return;
+        res = await getMe();
+        if (res.status === 200) {
+          setAuth((await res.json()).data);
+          return;
+        }
+      } finally {
+        setAuthLoading(false);
       }
     })();
-  }, [router]);
+  }, []);
 
-  return <AuthContext.Provider value={{ auth, setAuth }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ authLoading, auth, setAuth }}>{children}</AuthContext.Provider>;
 }

@@ -6,6 +6,11 @@ class AuthCredentials(BaseModel):
     password: str
 
 
+class ChangePassword(BaseModel):
+    old_password: str
+    new_password: str
+
+
 class Tokens(BaseModel):
     refresh_token: str
     access_token: str
@@ -29,3 +34,10 @@ class Me(BaseModel):
     is_first_login: bool
     is_active: bool
     change_password_on_next_login: bool
+
+
+class UpdateMe(BaseModel):
+    username: str | None = None
+    name: str | None = None
+    bio: str | None = None
+    is_active: bool | None = None

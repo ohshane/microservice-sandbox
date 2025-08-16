@@ -19,7 +19,7 @@ export async function login(payload: { email: string; password: string }) {
     body: JSON.stringify(payload),
     credentials: "include",
   });
-  return await me();
+  return await getMe();
 }
 
 export async function logout() {
@@ -42,12 +42,42 @@ export async function refresh() {
   });
 }
 
-export async function me() {
+export async function getMe() {
   return await fetch(`${API_URL}/api/v1/auth/me`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
     },
     credentials: "include",
+  });
+}
+
+export async function updateMe(payload: {
+  username?: string;
+  name?: string;
+  bio?: string;
+  is_active?: boolean;
+}) {
+  return await fetch(`${API_URL}/api/v1/auth/me`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function changePassword(payload: {
+  old_password: string;
+  new_password: string;
+}) {
+  return await fetch(`${API_URL}/api/v1/auth/me/change-password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify(payload),
   });
 }

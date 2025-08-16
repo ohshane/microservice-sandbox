@@ -267,14 +267,14 @@ async def refresh(tokens: dict = Depends(get_tokens), db: Session = Depends(get_
 
 
 @app.get("/me", response_model=P.Me)
-async def me(tokens: str = Depends(get_tokens), db: Session = Depends(get_db)):
+async def get_me(tokens: str = Depends(get_tokens), db: Session = Depends(get_db)):
     token = tokens.get("access_token") or tokens.get("bearer_token") or None
     if not token:
         return JSONResponse(create_response("Token is required."), 401)
 
     payload = jwt.verify_token(token, issuer="auth.service", audience="service")
-
     user = db.query(M.User).filter(M.User.id == payload.sub).first()
+    
     if not user:
         return JSONResponse(create_response("User not found."), 404)
 
@@ -295,3 +295,66 @@ async def me(tokens: str = Depends(get_tokens), db: Session = Depends(get_db)):
         ),
         200,
     )
+
+@app.post("/me", response_model=P.Me)
+async def update_me(
+    body: P.UpdateMe,
+    tokens: dict = Depends(get_tokens),
+    db: Session = Depends(get_db)
+):
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    if not token:
+        return JSONResponse(create_response("Token is required."), 401)
+
+    payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+    user = db.query(M.User).filter(M.User.id == payload.sub).first()
+    
+    if not user:
+        return JSONResponse(create_response("User not found."), 404)
+    
+    user.username = body.username or user.username
+    user.name = body.name or user.name
+    user.bio = body.bio or user.bio
+    user.is_active = body.is_active or user.is_active
+
+    db.commit()
+    db.refresh(user)
+
+    return JSONResponse(
+        create_response(
+            "User updated successfully.",
+            P.Me(
+                email=user.email,
+                username=user.username,
+                name=user.name,
+                bio=user.bio,
+                profile_url=user.profile_url,
+                role=user.role,
+                is_first_login=user.is_first_login,
+                is_active=user.is_active,
+                change_password_on_next_login=user.change_password_on_next_login,
+            )
+        ),
+        200
+    )
+
+@app.post("/me/change-password")
+async def change_password(
+    body: P.ChangePassword,
+    tokens: dict = Depends(get_tokens),
+    db: Session = Depends(get_db)
+):
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    if not token:
+        return JSONResponse(create_response("Token is required."), 401)
+
+    payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+    user = db.query(M.User).filter(M.User.id == payload.sub).first()
+    if not user or not verify_password(body.old_password, user.hashed_password):
+        return JSONResponse(create_response("User not found or old password incorrect."), 404)
+
+    user.hashed_password = hash_password(body.new_password)
+    db.commit()
+    db.refresh(user)
+
+    return JSONResponse(create_response("Password changed successfully."), 200)

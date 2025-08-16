@@ -1,22 +1,23 @@
 "use client";
 
-import React from "react";
-import { AuthProvider, useAuthContext } from '@/context/auth';
-import { useToastContext } from '@/context/toast';
-import { useRouter } from 'next/navigation';
+import { useEffect } from "react";
+import { useAuthContext } from "@/context/auth";
+import { useToastContext } from "@/context/toast";
+import { useRouter } from "next/navigation";
 
-export default function ProtectedLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const { auth } = useAuthContext();
+export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+  const { auth, authLoading } = useAuthContext();
   const { addToast } = useToastContext();
   const router = useRouter();
 
-  if (!auth) {
-    addToast({ type: "error", content: "You must be logged in to access this page." });
-    router.replace("/login?redirect=" + encodeURIComponent(window.location.pathname));
-  }
-  return <AuthProvider>{children}</AuthProvider>;
+  useEffect(() => {
+    if (authLoading) return;
+    if (!auth) {
+      addToast({ type: "error", content: "Please log in." });
+      router.replace("/login?redirect=" + encodeURIComponent(window.location.pathname));
+    }
+  }, [authLoading, auth, addToast, router]);
+
+  if (!auth) return null;
+  return <>{children}</>;
 }
