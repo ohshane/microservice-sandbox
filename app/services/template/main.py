@@ -3,11 +3,10 @@ import os
 import schemas.payloads as P
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from lib.infra import *
 from schemas.responses import create_model, create_response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
-from lib.infra import *
 
 APP_ENV = os.getenv("APP_ENV")
 

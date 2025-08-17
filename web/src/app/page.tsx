@@ -24,15 +24,6 @@ export default function Landing() {
   // Light theme only; dark toggle removed
   const { toasts, addToast } = useToastContext();
 
-  // Ensure page starts at top on initial load
-  useEffect(() => {
-    // Clear any hash from URL and scroll to top
-    if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", window.location.pathname);
-      window.scrollTo(0, 0);
-    }
-  }, []);
-
   return (
     <div className={`min-h-screen bg-white text-black selection:bg-black/80 selection:text-white`}>
       {/* Background */}

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Text, Boolean, DateTime, Integer
+from sqlalchemy import Boolean, Column, DateTime, Integer, Text, String
+
 from .base import BaseModel
 
 
@@ -15,7 +16,7 @@ class User(BaseModel):
     sso_provider = Column(Text, nullable=True)
     sso_id = Column(Text, nullable=True)
 
-    is_first_login = Column(Boolean, nullable=False, default=False)    
+    is_first_login = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)
     change_password_on_next_login = Column(Boolean, nullable=False, default=False)
     last_login_at = Column(DateTime, nullable=True)

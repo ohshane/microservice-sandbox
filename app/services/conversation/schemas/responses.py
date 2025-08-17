@@ -1,9 +1,8 @@
 from typing import Generic, TypeVar
 
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, Field
-
 from lib.utils import now
+from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 

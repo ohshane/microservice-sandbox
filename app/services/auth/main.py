@@ -1,22 +1,21 @@
+import logging
 import os
 import random
+from contextlib import asynccontextmanager
 
 import models as M
 import schemas.payloads as P
-from fastapi import Depends, FastAPI, Request, Cookie, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from lib.infra import *
+from lib.jwt import *
+from lib.middleware import get_tokens
+from lib.utils import *
+from models.base import Base
 from schemas.responses import create_model, create_response
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
-from models.base import Base
-
-from lib.middleware import get_tokens
-from lib.infra import *
-from lib.utils import *
-from lib.jwt import *
-from contextlib import asynccontextmanager
-import logging
 
 APP_ENV = os.getenv("APP_ENV")
 
@@ -95,7 +94,7 @@ app = FastAPI(root_path="/api/v1/auth", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "https://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -140,11 +139,10 @@ async def register(
     db.add(user)
     db.commit()
     db.refresh(user)
-    data = user.to_dict()
 
     try:
         await request.app.state.producer.send_and_wait(
-            "auth.user.registered", key=None, value=create_event(data)
+            "auth.user.registered", key=None, value=create_event(user.to_dict())
         )
     except Exception as e:
         return JSONResponse(create_response(str(e)), 500)
@@ -153,7 +151,9 @@ async def register(
 
 
 @app.post("/login", response_model=P.Tokens)
-async def login(body: P.AuthCredentials, db: Session = Depends(get_db)):
+async def login(
+    request: Request, body: P.AuthCredentials, db: Session = Depends(get_db)
+):
     user = db.query(M.User).filter(M.User.email == body.email).first()
     logger.debug(user.to_dict() if user else "User not found")
     if user is not None and verify_password(body.password, user.hashed_password):
@@ -196,7 +196,7 @@ async def login(body: P.AuthCredentials, db: Session = Depends(get_db)):
 
 
 @app.post("/logout", response_model=P.AccessToken)
-async def logout(tokens: dict = Depends(get_tokens)):
+async def logout(request: Request, tokens: dict = Depends(get_tokens)):
     token = tokens.get("access_token") or tokens.get("bearer_token") or None
     try:
         payload = jwt.verify_token(token, issuer="auth.service", audience="service")
@@ -230,7 +230,7 @@ async def logout(tokens: dict = Depends(get_tokens)):
 
 
 @app.post("/refresh", response_model=P.AccessToken)
-async def refresh(tokens: dict = Depends(get_tokens), db: Session = Depends(get_db)):
+async def refresh(request: Request, tokens: dict = Depends(get_tokens)):
     token = tokens.get("refresh_token") or tokens.get("bearer_token") or None
     refreshed_tokens = jwt.rotate_tokens(
         refresh_token=token, iss="auth.service", aud="service"
@@ -274,7 +274,7 @@ async def get_me(tokens: str = Depends(get_tokens), db: Session = Depends(get_db
 
     payload = jwt.verify_token(token, issuer="auth.service", audience="service")
     user = db.query(M.User).filter(M.User.id == payload.sub).first()
-    
+
     if not user:
         return JSONResponse(create_response("User not found."), 404)
 
@@ -296,11 +296,13 @@ async def get_me(tokens: str = Depends(get_tokens), db: Session = Depends(get_db
         200,
     )
 
+
 @app.post("/me", response_model=P.Me)
 async def update_me(
+    request: Request,
     body: P.UpdateMe,
     tokens: dict = Depends(get_tokens),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     token = tokens.get("access_token") or tokens.get("bearer_token") or None
     if not token:
@@ -308,10 +310,10 @@ async def update_me(
 
     payload = jwt.verify_token(token, issuer="auth.service", audience="service")
     user = db.query(M.User).filter(M.User.id == payload.sub).first()
-    
+
     if not user:
         return JSONResponse(create_response("User not found."), 404)
-    
+
     user.username = body.username or user.username
     user.name = body.name or user.name
     user.bio = body.bio or user.bio
@@ -319,6 +321,13 @@ async def update_me(
 
     db.commit()
     db.refresh(user)
+
+    try:
+        await request.app.state.producer.send_and_wait(
+            "auth.user.updated", key=None, value=create_event(user.to_dict())
+        )
+    except Exception as e:
+        return JSONResponse(create_response(str(e)), 500)
 
     return JSONResponse(
         create_response(
@@ -333,16 +342,17 @@ async def update_me(
                 is_first_login=user.is_first_login,
                 is_active=user.is_active,
                 change_password_on_next_login=user.change_password_on_next_login,
-            )
+            ),
         ),
-        200
+        200,
     )
+
 
 @app.post("/me/change-password")
 async def change_password(
     body: P.ChangePassword,
     tokens: dict = Depends(get_tokens),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     token = tokens.get("access_token") or tokens.get("bearer_token") or None
     if not token:
@@ -351,7 +361,9 @@ async def change_password(
     payload = jwt.verify_token(token, issuer="auth.service", audience="service")
     user = db.query(M.User).filter(M.User.id == payload.sub).first()
     if not user or not verify_password(body.old_password, user.hashed_password):
-        return JSONResponse(create_response("User not found or old password incorrect."), 404)
+        return JSONResponse(
+            create_response("User not found or old password incorrect."), 404
+        )
 
     user.hashed_password = hash_password(body.new_password)
     db.commit()

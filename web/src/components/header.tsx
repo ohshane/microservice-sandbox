@@ -7,20 +7,23 @@ import Link from 'next/link';
 export default function Header() {
   const [open, setOpen] = useState(false);
   const { auth, authLoading } = useAuthContext();
-  const [nav, setNav] = useState([
-    { name: "Features", href: "#features" },
-    { name: "Architecture", href: "#architecture" },
-    { name: "Get started", href: "#cli" },
-  ]);
+  const [nav, setNav] = useState<{ name: string, href: string }[]>([]);
 
   useEffect(() => {
     if (authLoading) return;
     if (auth) {
       setNav([
-        { name: "Features", href: "#features" },
-        { name: "Architecture", href: "#architecture" },
-        { name: "Get started", href: "#cli" },
+        { name: "Features", href: "/#features" },
+        { name: "Architecture", href: "/#architecture" },
+        { name: "Get started", href: "/#cli" },
+        { name: "Dashboard", href: "/dashboard" },
         { name: "Me", href: "/me" },
+      ]);
+    } else {
+      setNav([
+        { name: "Features", href: "/#features" },
+        { name: "Architecture", href: "/#architecture" },
+        { name: "Get started", href: "/#cli" },
       ]);
     }
   }, [auth, authLoading]);

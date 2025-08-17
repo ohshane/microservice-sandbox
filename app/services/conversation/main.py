@@ -1,24 +1,27 @@
+import json
+import logging
 import os
+from contextlib import asynccontextmanager
 
+import httpx
 import models as M
 import schemas.payloads as P
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-import httpx
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from lib.infra import *
+from lib.jwt import *
+from lib.utils import *
+from models.base import Base
 from schemas.responses import create_model, create_response
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
-from models.base import Base
-
-from lib.infra import *
-from lib.utils import *
-from lib.jwt import *
-from contextlib import asynccontextmanager
 
 APP_ENV = os.getenv("APP_ENV")
 
-# Jwt
+logging.basicConfig(level=logging.DEBUG if APP_ENV == "dev" else logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # Postgres
 DB_SCHEMA = os.getenv("DB_SCHEMA")
@@ -29,11 +32,11 @@ POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 postgres_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 get_db = new_db(url=postgres_url)
+db = new_db_session(url=postgres_url)
 engine = create_engine(url=postgres_url)
 assert DB_SCHEMA
-with engine.connect() as conn:
-    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "msa_{DB_SCHEMA}";'))
-    conn.commit()
+db.execute(text(f'CREATE SCHEMA IF NOT EXISTS "msa_{DB_SCHEMA}";'))
+db.commit()
 Base.metadata.create_all(bind=engine)
 
 
@@ -53,7 +56,7 @@ app = FastAPI(root_path="/api/v1/conversation", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "https://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,7 +71,7 @@ def healthz(db: Session = Depends(get_db)):
     except Exception as e:
         message = str(e)
 
-    return create_response(message)
+    return JSONResponse(create_response(message), 200)
 
 
 @app.post("")
@@ -76,15 +79,14 @@ async def completions(body: P.Conversation, db: Session = Depends(get_db)):
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"
+        "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
     }
     data = {
         "model": "gpt-4o",
         "messages": [
             {
                 "role": "developer",
-                "content": \
-"""
+                "content": """
 You are Cherry, the official AI assistant for CakeStack, founded by Shane Oh.
 
 # Company & Product Context
@@ -122,36 +124,31 @@ Cherry is the knowledgeable, practical, and friendly technical partner for anyon
 To use the tools, you can use the following format:
 ```
 ```
-"""
+""",
             },
-            *[m.model_dump() for m in body.messages]
+            *[m.model_dump() for m in body.messages],
         ],
-        "stream": True
+        "stream": True,
     }
 
-    def parser(s):
-        import json
-        if s.startswith("data: "):
-            s = s[6:].strip()
-        if s == "[DONE]":
-            return None
-        try:
-            return json.loads(s)
-        except json.JSONDecodeError:
-            return None
-
     async def stream_generator(url: str, data: dict):
+        chunks = ""
         async with httpx.AsyncClient(timeout=60) as client:
-            async with client.stream("POST", url, headers=headers, json=data) as response:
+            async with client.stream(
+                "POST", url, headers=headers, json=data
+            ) as response:
                 async for b in response.aiter_bytes():
-                    print(parser(b.decode("utf-8")))
+                    chunks += b.decode("utf-8")
                     yield b
+        chunks = [c.removeprefix("data: ").strip() for c in chunks.split("\n\n") if c.startswith("data: ")]
+        chunks = [json.loads(c) for c in chunks if c and c != "[DONE]"]
+        chunks = [c["choices"][0].get("delta").get("content") for c in chunks]
+        chunks = [c for c in chunks if c is not None]
+        content = "".join(chunks)
+        logger.debug(content)
 
     return StreamingResponse(
         stream_generator(url=url, data=data),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

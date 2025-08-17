@@ -37,7 +37,6 @@ export default function MePage() {
   const [changingPw, setChangingPw] = useState(false);
 
   useEffect(() => {
-    console.log("authLoading:", authLoading, "auth:", auth);
     if (!auth || authLoading) return;
     setForm({
       username: auth.username ?? "",
