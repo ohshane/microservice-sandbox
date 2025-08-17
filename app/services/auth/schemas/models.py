@@ -1,6 +1,6 @@
 from sqlalchemy import Boolean, Column, DateTime, Integer, Text, String
 
-from .base import BaseModel
+from lib.model import BaseModel
 
 
 class User(BaseModel):

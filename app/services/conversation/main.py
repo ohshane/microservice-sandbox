@@ -4,7 +4,7 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
-import models as M
+import schemas.models as M
 import schemas.payloads as P
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,8 +12,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from lib.infra import *
 from lib.jwt import *
 from lib.utils import *
-from models.base import Base
-from schemas.responses import create_model, create_response
+from lib.middleware import get_tokens
+from lib.model import Base
+from lib.response import create_model, create_response
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
@@ -38,6 +39,9 @@ assert DB_SCHEMA
 db.execute(text(f'CREATE SCHEMA IF NOT EXISTS "msa_{DB_SCHEMA}";'))
 db.commit()
 Base.metadata.create_all(bind=engine)
+
+# Jwt
+jwt = JWTService()
 
 
 @asynccontextmanager
@@ -75,7 +79,58 @@ def healthz(db: Session = Depends(get_db)):
 
 
 @app.post("")
-async def completions(body: P.Conversation, db: Session = Depends(get_db)):
+async def completions(
+    body: P.Conversation,
+    tokens: dict = Depends(get_tokens),
+    db: Session = Depends(get_db),
+):
+
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    sub = None
+    try:
+        payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+        sub = payload.sub
+    except:
+        pass
+
+    user = db.query(M.User).filter(M.User.user_id == sub).first() if sub else None
+
+    prev_conversation = (
+        db.query(M.Conversation).filter_by(id=body.conversation_id).first()
+    )
+    if sub:
+        prev_conversation.user_id = sub
+        db.add(prev_conversation)
+        db.commit()
+        db.refresh(prev_conversation)
+
+    prev_message = None
+    if prev_conversation:
+        prev_message = (
+            db.query(M.Message)
+            .filter_by(conversation_id=body.conversation_id)
+            .order_by(M.Message.created_at.desc())
+            .first()
+        )
+    else:
+        prev_conversation = M.Conversation(
+            id=body.conversation_id,
+            user_id=sub if sub else None,
+        )
+        db.add(prev_conversation)
+        db.commit()
+        db.refresh(prev_conversation)
+
+    user_message = M.Message(
+        parent_id=prev_message.id if prev_message else None,
+        conversation_id=body.conversation_id,
+        role="user",
+        content=body.messages[-1].content,
+    )
+    db.add(user_message)
+    db.commit()
+    db.refresh(user_message)
+
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
@@ -140,15 +195,30 @@ To use the tools, you can use the following format:
                 async for b in response.aiter_bytes():
                     chunks += b.decode("utf-8")
                     yield b
-        chunks = [c.removeprefix("data: ").strip() for c in chunks.split("\n\n") if c.startswith("data: ")]
+        chunks = [
+            c.removeprefix("data: ").strip()
+            for c in chunks.split("\n\n")
+            if c.startswith("data: ")
+        ]
         chunks = [json.loads(c) for c in chunks if c and c != "[DONE]"]
         chunks = [c["choices"][0].get("delta").get("content") for c in chunks]
         chunks = [c for c in chunks if c is not None]
         content = "".join(chunks)
         logger.debug(content)
 
+        assistant_message = M.Message(
+            parent_id=user_message.id,
+            conversation_id=body.conversation_id,
+            role="assistant",
+            content=content,
+        )
+        db.add(assistant_message)
+        db.commit()
+        db.refresh(assistant_message)
+
     return StreamingResponse(
         stream_generator(url=url, data=data),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+

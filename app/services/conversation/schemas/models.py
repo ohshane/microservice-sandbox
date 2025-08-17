@@ -1,6 +1,6 @@
 from sqlalchemy import Boolean, Column, DateTime, Integer, Text, String
 
-from .base import BaseModel
+from lib.model import BaseModel
 
 
 class User(BaseModel):
@@ -27,3 +27,15 @@ class User(BaseModel):
     change_password_on_next_login = Column(Boolean)
     last_login_at = Column(DateTime)
     last_password_change_at = Column(DateTime)
+
+
+class Message(BaseModel):
+    conversation_id = Column(Text, nullable=False)
+    parent_id = Column(Text, nullable=True, default=None)
+    role = Column(Text)
+    content = Column(Text)
+
+
+class Conversation(BaseModel):
+    user_id = Column(Text)
+    title = Column(Text)

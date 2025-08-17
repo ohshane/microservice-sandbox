@@ -3,17 +3,17 @@ import os
 import random
 from contextlib import asynccontextmanager
 
-import models as M
+import schemas.models as M
 import schemas.payloads as P
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from lib.infra import *
 from lib.jwt import *
-from lib.middleware import get_tokens
+from lib.middleware import *
 from lib.utils import *
-from models.base import Base
-from schemas.responses import create_model, create_response
+from lib.model import Base
+from lib.response import create_model, create_response
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 

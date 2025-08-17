@@ -9,26 +9,9 @@ services:
       - ./cert.pem:/etc/ssl/certs/cert.pem
       - ./key.pem:/etc/ssl/certs/key.pem
     depends_on:
-      - template
       - auth
       - conversation
       - conversation-worker
-
-  template:
-    build:
-      context: .
-      dockerfile: docker/python/Dockerfile.dev
-      args:
-        - SERVICE=template
-    env_file:
-      - .env.dev
-    environment:
-      - DB_SCHEMA=template
-    deploy:
-      replicas: 3
-    volumes:
-      - ./services/template:/app
-      - ./lib:/app/lib
 
   auth:
     build:
@@ -40,8 +23,6 @@ services:
       - .env.dev
     environment:
       - DB_SCHEMA=auth
-    deploy:
-      replicas: 3
     volumes:
       - ./services/auth:/app
       - ./lib:/app/lib
@@ -56,8 +37,6 @@ services:
       - .env.dev
     environment:
       - DB_SCHEMA=conversation
-    deploy:
-      replicas: 3
     volumes:
       - ./services/conversation:/app
       - ./lib:/app/lib
@@ -73,8 +52,6 @@ services:
       - .env.dev
     environment:
       - DB_SCHEMA=conversation
-    deploy:
-      replicas: 3
     volumes:
       - ./services/conversation:/app
       - ./lib:/app/lib

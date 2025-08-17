@@ -14,9 +14,7 @@ interface Message {
 type Role = Message["role"];
 
 export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>([
-    { id: "", role: "assistant", content: "Hi there! How can I assist you today?" },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [controller, setController] = useState<AbortController | null>(null);
@@ -40,6 +38,7 @@ export default function Chat() {
     }
   }, []);
 
+
   function handleStop() {
     controller?.abort();
     setPending(false);
@@ -58,7 +57,7 @@ export default function Chat() {
 
     try {
       // Build payload using current messages plus the new user message
-      const prevMsgs = [...messages, userMsg].slice(1);
+      const prevMsgs = [...messages, userMsg];
 
       const res = await fetch(`${API_URL}/api/v1/conversation`, {
         method: "POST",
@@ -66,6 +65,7 @@ export default function Chat() {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
         },
+        credentials: "include",
         body: JSON.stringify({
           conversation_id: localStorage.getItem("cs-conversationid"),
           messages: prevMsgs,
