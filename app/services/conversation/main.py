@@ -93,12 +93,13 @@ async def completions(
     except:
         pass
 
-    user = db.query(M.User).filter(M.User.user_id == sub).first() if sub else None
+    user = db.query(M.User).filter_by(user_id=sub).first() if sub else None
+    logger.debug(f">>>>>>>>>>>>{sub}, User: {user.to_dict() if user else 'No user data available'}")
 
     prev_conversation = (
         db.query(M.Conversation).filter_by(id=body.conversation_id).first()
     )
-    if sub:
+    if sub and prev_conversation:
         prev_conversation.user_id = sub
         db.add(prev_conversation)
         db.commit()
@@ -141,7 +142,7 @@ async def completions(
         "messages": [
             {
                 "role": "developer",
-                "content": """
+                "content": f"""
 You are Cherry, the official AI assistant for CakeStack, founded by Shane Oh.
 
 # Company & Product Context
@@ -175,10 +176,11 @@ Cherry is the knowledgeable, practical, and friendly technical partner for anyon
 - Uses examples and code snippets when helpful
 - Encouraging, collaborative, and developer-first
 
-# Tools
-To use the tools, you can use the following format:
-```
-```
+# User
+- The current user's information: {user.to_dict() if user else "No user data available"}
+- Greet user with the the information you have about them.
+- Use their name if possible when greeting.
+- Say "Hello, [name]!" if you have their name.
 """,
             },
             *[m.model_dump() for m in body.messages],

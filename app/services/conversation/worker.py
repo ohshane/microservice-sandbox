@@ -4,6 +4,7 @@ import logging
 from lib.infra import *
 from sqlalchemy import create_engine, text
 from lib.model import Base
+import schemas.models as M
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -24,9 +25,8 @@ Base.metadata.create_all(bind=engine)
 
 
 def handler(msg) -> None:
-    from models.user import User
 
-    user = db.query(User).filter_by(user_id=msg.value['data']['id']).first()
+    user = db.query(M.User).filter_by(user_id=msg.value['data']['id']).first()
     if user:
         for key, value in msg.value['data'].items():
             if hasattr(user, key):
@@ -37,7 +37,7 @@ def handler(msg) -> None:
         user.user_deleted_at = msg.value['data']['deleted_at']
         db.commit()
     else:
-        user = User(
+        user = M.User(
             **msg.value['data'],
             user_id=msg.value['data']['id'],
             user_seq=msg.value['data']['seq'],
