@@ -21,7 +21,7 @@ export default function ChatPage() {
 
       {/* New Chat Pane */}
       <main className="flex-1 min-w-0 flex flex-col max-w-3xl mx-auto w-full">
-        <Chat messages={[]} conversationId={conversationId} />
+        <Chat messages={[]} conversationId={conversationId} isNew={false} />
       </main>
     </div>
   );

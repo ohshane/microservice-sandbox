@@ -2,32 +2,34 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Markdown from 'react-markdown';
-import { v4 as uuidv4 } from 'uuid';
-import { API_URL } from '@/config';
-import { getConversation } from '@/services/chat';
-import { useChatListContext } from '@/context/chat';
-import Code from '@/components/code';
+import Markdown from "react-markdown";
+import { v4 as uuidv4 } from "uuid";
+import { API_URL } from "@/config";
+import { getConversation } from "@/services/chat";
+import { useChatListContext } from "@/context/chat";
+import Code from "@/components/code";
 
 interface Message {
   id: string;
   role: "developer" | "user" | "assistant";
   content: string;
 }
+
 type Role = Message["role"];
 
-export default function Chat({ messages: initialMessages = [], conversationId: initialConverationId = null }: { messages: Message[]; conversationId: string | null }) {
+type ChatProps = { messages: Message[]; conversationId: string | null, isNew: boolean };
+
+export default function Chat({ messages: initialMessages = [], conversationId: initialConversationId = null, isNew = false }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages ?? []);
-  const { bumpVersion } = useChatListContext();
-
-  const conversationIdRef = useRef<string>(initialConverationId || uuidv4());
-  const conversationId = conversationIdRef.current;
-  const isNewConversation = !initialConverationId;
-
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const [controller, setController] = useState<AbortController | null>(null);
+
+  const { bumpVersion } = useChatListContext();
+
+  // Lazily create a conversation id on first user message
+  const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
 
   const autoKickRef = useRef<string | null>(null);
 
@@ -36,161 +38,159 @@ export default function Chat({ messages: initialMessages = [], conversationId: i
 
   const canSend = useMemo(() => input.trim().length > 0 && !pending, [input, pending]);
 
-
-useEffect(() => {
-  const el = scrollRef.current;
-  if (!el) return;
-  const top = el.scrollHeight;
-  if (pending) {
-    el.scrollTop = top; // fast during streaming
-  } else {
-    el.scrollTo({ top, behavior: "smooth" });
-  }
-}, [messages, pending]);
+  // --- Utilities -----------------------------------------------------------
+  const focusInput = () => requestAnimationFrame(() => inputRef.current?.focus());
 
   useEffect(() => {
-    inputRef.current?.focus();
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.scrollHeight;
+    if (pending) {
+      el.scrollTop = top; // fast during streaming
+    } else {
+      el.scrollTo({ top, behavior: "smooth" });
+    }
+  }, [messages, pending]);
+
+  // Keep the input focused
+  useEffect(() => {
+    focusInput();
   }, [messages, pending]);
 
   function handleStop() {
     controller?.abort();
     setPending(false);
     setController(null);
+    setShowTyping(false);
   }
 
-  /**
-   * Continue the conversation from existing history. This POSTs the current messages
-   * (provided as a seed array) to the /conversation endpoint and streams
-   * the assistant response. It does NOT append a new user message.
-   */
-  const continueConversation = useCallback(async (history: Message[]) => {
-    const cid = conversationIdRef.current;
-    if (!cid || history.length === 0) return;
-
+  // Stream parser shared by both send/continue paths
+  const postAndStream = useCallback(async (cid: string, history: Message[]) => {
     const ac = new AbortController();
     setController(ac);
     setPending(true);
     setShowTyping(true);
 
-    try {
-      const res = await fetch(`${API_URL}/api/v1/conversation`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "text/event-stream",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          conversation_id: cid,
-          messages: history,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
-        }),
-        signal: ac.signal,
-      });
+    const res = await fetch(`${API_URL}/api/v1/conversation`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        conversation_id: cid,
+        messages: history,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
+      }),
+      signal: ac.signal,
+    });
 
-      if (!res.ok || !res.body) {
-        console.error("Streaming response not ok/body missing", res.status, res.statusText);
-        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    if (!res.ok || !res.body) {
+      console.error("Streaming response not ok/body missing", res.status, res.statusText);
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = ""; // accumulates raw text chunks
+    let eventData = ""; // accumulates multi-line data: fields for one SSE event
+
+    const flushEvent = () => {
+      const payload = eventData.trim();
+      eventData = "";
+      if (!payload) return "CONT" as const;
+      if (payload === "[DONE]") {
+        setPending(false);
+        return "DONE" as const;
       }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
-      let eventData = "";
-
-      const flushEvent = () => {
-        const payload = eventData.trim();
-        eventData = "";
-        if (!payload) return;
-        if (payload === "[DONE]") {
-          setPending(false);
-          return "DONE" as const;
+      try {
+        const obj = JSON.parse(payload);
+        const delta =
+          obj?.choices?.[0]?.delta?.content ?? obj?.delta?.content ?? obj?.content ?? "";
+        if (typeof delta === "string" && delta.length) {
+          setMessages((prev) => {
+            const exists = prev.some((m) => m.id === obj.id);
+            if (!exists) {
+              return [...prev, { id: obj.id, role: "assistant", content: delta } as Message];
+            }
+            return prev.map((m) => (m.id === obj.id ? { ...m, content: m.content + delta } : m));
+          });
+          setShowTyping(false); // first token arrived
         }
-        try {
-          const obj = JSON.parse(payload);
-          const delta =
-            obj?.choices?.[0]?.delta?.content ??
-            obj?.delta?.content ??
-            obj?.content ??
-            "";
+      } catch {
+        // ignore malformed lines
+      }
+      return "CONT" as const;
+    };
 
-          if (typeof delta === "string" && delta.length) {
-            setMessages((prev) => {
-              const exists = prev.some((m) => m.id === obj.id);
-              if (!exists) {
-                return [...prev, { id: obj.id, role: "assistant", content: delta } as Message];
-              }
-              return prev.map((m) => (m.id === obj.id ? { ...m, content: m.content + delta } : m));
-            });
-            // Hide typing indicator as soon as first token arrives
-            setShowTyping(false);
-            // Keep pending true until [DONE]
-          }
-        } catch {}
-      };
-
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (!chunk) continue;
+      buffer += chunk;
       while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        if (!chunk) continue;
-        buffer += chunk;
-        while (true) {
-          const nlIndex = buffer.indexOf("\n");
-          if (nlIndex === -1) break;
-          let line = buffer.slice(0, nlIndex);
-          buffer = buffer.slice(nlIndex + 1);
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line === "") {
-            const status = flushEvent();
-            if (status === "DONE") break;
-            continue;
-          }
-          if (line.startsWith("data:")) {
-            const v = line.length >= 5 ? line.slice(5).trimStart() : "";
-            eventData += (eventData ? "\n" : "") + v;
-          }
+        const nlIndex = buffer.indexOf("\n");
+        if (nlIndex === -1) break;
+        let line = buffer.slice(0, nlIndex);
+        buffer = buffer.slice(nlIndex + 1);
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        if (line === "") {
+          const status = flushEvent();
+          if (status === "DONE") return; // finish stream
+          continue;
+        }
+        if (line.startsWith("data:")) {
+          const v = line.length >= 5 ? line.slice(5).trimStart() : "";
+          eventData += (eventData ? "\n" : "") + v;
         }
       }
-    } catch (err) {
-      console.error("streaming error:", err);
-    } finally {
-      setController(null);
     }
   }, []);
 
-  // On mount / when props change: fetch history if we have a conversationId,
-  // extend it with messages from props, then auto-continue if last role is user.
+  // Continue existing conversation without appending a new user message
+  const continueConversation = useCallback(
+    async (history: Message[]) => {
+      const cid = conversationId;
+      if (!cid || history.length === 0) return;
+      try {
+        await postAndStream(cid, history);
+      } catch (err) {
+        console.error("streaming error:", err);
+      } finally {
+        setController(null);
+      }
+    },
+    [conversationId, postAndStream]
+  );
+
+  // Initial load: if we have a conversation id, fetch its history and auto-continue if last role is user.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const cid = conversationIdRef.current;
+      const cid = conversationId;
       try {
-        // If this is a new conversation (generated ID), don't fetch — just set the initial messages and exit.
-        if (isNewConversation) {
+        if (!cid) {
+          // No id yet: show only seed messages and wait for first send
           if (!cancelled) setMessages(initialMessages ?? []);
           return;
         }
-
-        let loaded: Message[] = [];
-        const res = await getConversation(cid);
-        if (!res.ok) {
-          console.warn("Failed to load conversation:", res.status, res.statusText);
+        let loaded: Message[] = []
+        if (!isNew) {
+          const res = await getConversation(cid);
+          loaded = (await res.json()).data.messages;
         }
-        loaded = (await res.json()).data.messages;
-
-        // Extend with messages passed via props
         const merged = [...loaded, ...(initialMessages ?? [])];
         if (!cancelled) setMessages(merged);
 
         const last = merged[merged.length - 1];
-        // Only auto-continue once per conversationId
         if (!cancelled && last && last.role === "user" && autoKickRef.current !== cid) {
           autoKickRef.current = cid;
           await continueConversation(merged);
         }
-      } catch (e) {
-        console.error(e);
+      } catch {
+        // Ignore fetch/parse errors here; UI will behave as new chat
       } finally {
         await bumpVersion();
       }
@@ -198,127 +198,31 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [isNewConversation, initialMessages, continueConversation, bumpVersion]);
+  }, [conversationId, initialMessages, continueConversation, bumpVersion, isNew]);
 
+  // Send a new user message (creates a conversation id if needed)
   async function sendMessage(content: string) {
     if (!content.trim()) return;
-    const cid = conversationIdRef.current;
+
+    // Assign conversation id lazily on first send
+    let cid = conversationId;
+    if (!cid) {
+      cid = uuidv4();
+      setConversationId(cid);
+    }
 
     const userMsg: Message = { id: uuidv4(), role: "user", content };
     setMessages((prev) => [...prev, userMsg]);
 
-    const ac = new AbortController();
-    setController(ac);
-    setPending(true);
-    setShowTyping(true);
-
     try {
-      // Build payload using latest messages plus the new user message
-      const prevMsgs = [...messages, userMsg];
-
-      const res = await fetch(`${API_URL}/api/v1/conversation`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "text/event-stream",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          conversation_id: cid,
-          messages: prevMsgs,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
-        }),
-        signal: ac.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        console.error("Streaming response not ok/body missing", res.status, res.statusText);
-        throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";            // accumulates raw text chunks
-      let eventData = "";         // accumulates multi-line "data:" fields for one SSE event
-
-      const flushEvent = () => {
-        const payload = eventData.trim();
-        eventData = "";
-        if (!payload) return;
-
-        if (payload === "[DONE]") {
-          setPending(false);
-          return "DONE";
-        }
-
-        try {
-          const obj = JSON.parse(payload);
-          const delta =
-            obj?.choices?.[0]?.delta?.content ??
-            obj?.delta?.content ??
-            obj?.content ??
-            "";
-
-          if (typeof delta === "string" && delta.length) {
-            setMessages((prev) => {
-              const exists = prev.some((m) => m.id === obj.id);
-              if (!exists) {
-                return [...prev, { id: obj.id, role: "assistant", content: delta }];
-              }
-              return prev.map((m) =>
-                m.id === obj.id ? { ...m, content: m.content + delta } : m
-              );
-            });
-            // Hide typing indicator as soon as first token arrives
-            setShowTyping(false);
-            // Keep pending true until [DONE]
-          }
-        } catch {}
-      };
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        if (!chunk) continue;
-
-        buffer += chunk;
-
-        // Extract lines from buffer
-        while (true) {
-          const nlIndex = buffer.indexOf("\n");
-          if (nlIndex === -1) break;
-
-          // Take one line (trim trailing CR)
-          let line = buffer.slice(0, nlIndex);
-          buffer = buffer.slice(nlIndex + 1);
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-
-          if (line === "") {
-            // Blank line = end of one SSE event
-            const status = flushEvent();
-            if (status === "DONE") {
-              break;
-            }
-            continue;
-          }
-
-          // Parse SSE fields: data:, event:, id:, retry:
-          if (line.startsWith("data:")) {
-            // "data:" plus optional space
-            const v = line.length >= 5 ? line.slice(5).trimStart() : "";
-            // Accumulate (SSE allows multi-line data fields)
-            eventData += (eventData ? "\n" : "") + v;
-          }
-          // We ignore "event:", "id:", "retry:" for now — extend if needed
-        }
-      }
+      const history = [...messages, userMsg];
+      await postAndStream(cid, history);
     } catch (err) {
       console.error("streaming error:", err);
     } finally {
       setController(null);
       setInput("");
-      bumpVersion();
+      void bumpVersion();
     }
   }
 
@@ -365,14 +269,11 @@ useEffect(() => {
                 if (!pending) {
                   const toSend = input;
                   setInput("");
-                  sendMessage(toSend);
+                  void sendMessage(toSend);
                 }
               }
             }}
-            onBlur={() => {
-              // keep focus on the textbox
-              requestAnimationFrame(() => inputRef.current?.focus());
-            }}
+            onBlur={focusInput}
           />
           {!pending ? (
             <button
@@ -381,7 +282,7 @@ useEffect(() => {
                 if (canSend) {
                   const toSend = input;
                   setInput("");
-                  sendMessage(toSend);
+                  void sendMessage(toSend);
                 }
               }}
               disabled={!canSend}
@@ -411,7 +312,7 @@ function Bubble({ role, children }: { role: Role; children: React.ReactNode }) {
   return (
     <div className={`flex ${align}`}>
       <div className={`${role === "assistant" ? "max-w-full" : "max-w-[80%]"} rounded-2xl px-3 py-2 text-sm ${bg}`}>
-        { typeof children === 'string' ? (
+        {typeof children === "string" ? (
           <Markdown
             components={{
               code: (props: any) => <Code {...props} />,
@@ -419,7 +320,9 @@ function Bubble({ role, children }: { role: Role; children: React.ReactNode }) {
           >
             {children as string}
           </Markdown>
-        ) : children }
+        ) : (
+          children
+        )}
       </div>
     </div>
   );

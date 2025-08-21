@@ -48,7 +48,6 @@ export default function ConversationList({
   }, []);
 
   useEffect(() => {
-    console.log("Loading conversations, version:", version);
     load();
   }, [load, version]);
 

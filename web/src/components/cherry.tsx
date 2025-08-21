@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffe
 import { MessageCircle, Maximize2 } from "lucide-react";
 import Chat from "./chat";
 import { useRouter } from "next/navigation";
+import { v4 as uuidv4 } from "uuid";
 
 // ---- Types & constants ----------------------------------------------------
 
@@ -98,6 +99,7 @@ export default function Cherry() {
   const [maximized, setMaximized] = useState(false);
   const [position, setPosition] = useState<Position>("bottom-right");
   const [navAnimating, setNavAnimating] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(uuidv4());
 
   // Drag state
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -330,7 +332,7 @@ export default function Cherry() {
               setNavAnimating(true);
               navTimerRef.current = window.setTimeout(() => {
                 navTimerRef.current = null;
-                router.push("/dashboard");
+                router.push(`/chat/${conversationId}`);
               }, NAV_MS);
             }}
           >
@@ -344,7 +346,7 @@ export default function Cherry() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
-            <Chat messages={[]} conversationId={null} />
+            <Chat messages={[]} conversationId={conversationId} isNew={true} />
           </div>
         </div>
       )}
