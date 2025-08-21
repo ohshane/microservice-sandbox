@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+import asyncio
 
 import httpx
 import schemas.models as M
@@ -60,7 +61,12 @@ app = FastAPI(root_path="/api/v1/conversation", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://localhost:3000",
+        "http://192.168.0.34:3000",
+        "https://192.168.0.34:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,7 +75,7 @@ app.add_middleware(
 
 @app.get("/healthz", response_model=create_model())
 def healthz(db: Session = Depends(get_db)):
-    message = "Auth service is healthy."
+    message = "Conversation service is healthy."
     try:
         db.execute(text("SELECT 1"))
     except Exception as e:
@@ -78,9 +84,20 @@ def healthz(db: Session = Depends(get_db)):
     return JSONResponse(create_response(message), 200)
 
 
-@app.post("")
-async def completions(
-    body: P.Conversation,
+async def set_title(db: Session, conv: M.Conversation, text: str):
+    try:
+        title = await summarize(text=text, max_length=30)
+        conv.title = title
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    except Exception as e:
+        logger.exception("set_title_async failed: %s", e)
+
+
+@app.post("/prepare")
+async def prepare(
+    body: P.ConversationPrepare,
     tokens: dict = Depends(get_tokens),
     db: Session = Depends(get_db),
 ):
@@ -93,8 +110,40 @@ async def completions(
     except:
         pass
 
+    conversation = M.Conversation(
+        id=body.conversation_id,
+        user_id=sub if sub else None,
+    )
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return JSONResponse(
+        create_response(
+            "Conversation prepared successfully.",
+        ),
+        200,
+    )
+
+
+@app.post("")
+async def completions(
+    body: P.Conversation,
+    tokens: dict = Depends(get_tokens),
+    db: Session = Depends(get_db),
+):
+    logger.debug(">>>>>>>>>>>>>>>>>>>>>>>>>>")
+    logger.debug(body)
+    logger.debug("<<<<<<<<<<<<<<<<<<<<<<<<<<")
+
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    sub = None
+    try:
+        payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+        sub = payload.sub
+    except:
+        pass
+
     user = db.query(M.User).filter_by(user_id=sub).first() if sub else None
-    logger.debug(f">>>>>>>>>>>>{sub}, User: {user.to_dict() if user else 'No user data available'}")
 
     prev_conversation = (
         db.query(M.Conversation).filter_by(id=body.conversation_id).first()
@@ -131,6 +180,9 @@ async def completions(
     db.add(user_message)
     db.commit()
     db.refresh(user_message)
+
+    if prev_conversation.title is None or prev_conversation.title == "":
+        asyncio.create_task(set_title(db, prev_conversation, body.messages[-1].content))
 
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
@@ -221,6 +273,75 @@ Cherry is the knowledgeable, practical, and friendly technical partner for anyon
     return StreamingResponse(
         stream_generator(url=url, data=data),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
+
+@app.get("/list")
+async def list_conversations(
+    tokens: dict = Depends(get_tokens),
+    db: Session = Depends(get_db),
+):
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    try:
+        payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+    except Exception as e:
+        raise e
+
+    conversations = (
+        db.query(M.Conversation)
+        .filter_by(user_id=payload.sub)
+        .order_by(M.Conversation.created_at.desc())
+        .all()
+    )
+
+    return JSONResponse(
+        create_response(
+            "Conversations list retrieved successfully.",
+            [c.to_dict() for c in conversations],
+        ),
+        200,
+    )
+
+
+@app.get("/list/{conversation_id}")
+async def get_conversation(
+    conversation_id: str,
+    tokens: dict = Depends(get_tokens),
+    db: Session = Depends(get_db),
+):
+    token = tokens.get("access_token") or tokens.get("bearer_token") or None
+    try:
+        payload = jwt.verify_token(token, issuer="auth.service", audience="service")
+    except Exception as e:
+        raise e
+
+    conversation = (
+        db.query(M.Conversation)
+        .filter_by(id=conversation_id, user_id=payload.sub)
+        .first()
+    )
+
+    if not conversation:
+        return JSONResponse(create_response("Conversation not found.", None), 404)
+
+    messages = (
+        db.query(M.Message)
+        .filter_by(conversation_id=conversation_id)
+        .order_by(M.Message.created_at.asc())
+        .all()
+    )
+
+    return JSONResponse(
+        create_response(
+            "Conversation retrieved successfully.",
+            {
+                "conversation": conversation.to_dict(),
+                "messages": [m.to_dict() for m in messages],
+            },
+        ),
+        200,
+    )
