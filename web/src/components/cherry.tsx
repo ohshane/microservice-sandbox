@@ -344,7 +344,7 @@ export default function Cherry() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
-            <Chat />
+            <Chat messages={[]} conversationId={null} />
           </div>
         </div>
       )}

@@ -13,10 +13,7 @@ export default function Header() {
     if (authLoading) return;
     if (auth) {
       setNav([
-        { name: "Features", href: "/#features" },
-        { name: "Architecture", href: "/#architecture" },
-        { name: "Get started", href: "/#cli" },
-        { name: "Dashboard", href: "/dashboard" },
+        { name: "Chat", href: "/chat" },
         { name: "Me", href: "/me" },
       ]);
     } else {

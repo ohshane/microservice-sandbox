@@ -1,10 +1,13 @@
 // POST-streaming implementation, parses text/event-stream from fetch(POST)
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from 'react-markdown';
 import { v4 as uuidv4 } from 'uuid';
 import { API_URL } from '@/config';
+import { getConversation } from '@/services/chat';
+import { useChatListContext } from '@/context/chat';
+import Code from '@/components/code';
 
 interface Message {
   id: string;
@@ -13,31 +16,41 @@ interface Message {
 }
 type Role = Message["role"];
 
-export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>([]);
+export default function Chat({ messages: initialMessages = [], conversationId: initialConverationId = null }: { messages: Message[]; conversationId: string | null }) {
+  const [messages, setMessages] = useState<Message[]>(initialMessages ?? []);
+  const { bumpVersion } = useChatListContext();
+
+  const conversationIdRef = useRef<string>(initialConverationId || uuidv4());
+  const conversationId = conversationIdRef.current;
+  const isNewConversation = !initialConverationId;
+
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  const [showTyping, setShowTyping] = useState(false);
   const [controller, setController] = useState<AbortController | null>(null);
+
+  const autoKickRef = useRef<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const canSend = useMemo(() => input.trim().length > 0 && !pending, [input, pending]);
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, pending]);
+
+useEffect(() => {
+  const el = scrollRef.current;
+  if (!el) return;
+  const top = el.scrollHeight;
+  if (pending) {
+    el.scrollTop = top; // fast during streaming
+  } else {
+    el.scrollTo({ top, behavior: "smooth" });
+  }
+}, [messages, pending]);
 
   useEffect(() => {
     inputRef.current?.focus();
-  }, [messages]);
-
-  useEffect(() => {
-    if (!localStorage.getItem("cs-conversationid")) {
-      localStorage.setItem("cs-conversationid", uuidv4());
-    }
-  }, []);
-
+  }, [messages, pending]);
 
   function handleStop() {
     controller?.abort();
@@ -45,8 +58,151 @@ export default function Chat() {
     setController(null);
   }
 
+  /**
+   * Continue the conversation from existing history. This POSTs the current messages
+   * (provided as a seed array) to the /conversation endpoint and streams
+   * the assistant response. It does NOT append a new user message.
+   */
+  const continueConversation = useCallback(async (history: Message[]) => {
+    const cid = conversationIdRef.current;
+    if (!cid || history.length === 0) return;
+
+    const ac = new AbortController();
+    setController(ac);
+    setPending(true);
+    setShowTyping(true);
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/conversation`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          conversation_id: cid,
+          messages: history,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
+        }),
+        signal: ac.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        console.error("Streaming response not ok/body missing", res.status, res.statusText);
+        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let eventData = "";
+
+      const flushEvent = () => {
+        const payload = eventData.trim();
+        eventData = "";
+        if (!payload) return;
+        if (payload === "[DONE]") {
+          setPending(false);
+          return "DONE" as const;
+        }
+        try {
+          const obj = JSON.parse(payload);
+          const delta =
+            obj?.choices?.[0]?.delta?.content ??
+            obj?.delta?.content ??
+            obj?.content ??
+            "";
+
+          if (typeof delta === "string" && delta.length) {
+            setMessages((prev) => {
+              const exists = prev.some((m) => m.id === obj.id);
+              if (!exists) {
+                return [...prev, { id: obj.id, role: "assistant", content: delta } as Message];
+              }
+              return prev.map((m) => (m.id === obj.id ? { ...m, content: m.content + delta } : m));
+            });
+            // Hide typing indicator as soon as first token arrives
+            setShowTyping(false);
+            // Keep pending true until [DONE]
+          }
+        } catch {}
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
+        buffer += chunk;
+        while (true) {
+          const nlIndex = buffer.indexOf("\n");
+          if (nlIndex === -1) break;
+          let line = buffer.slice(0, nlIndex);
+          buffer = buffer.slice(nlIndex + 1);
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line === "") {
+            const status = flushEvent();
+            if (status === "DONE") break;
+            continue;
+          }
+          if (line.startsWith("data:")) {
+            const v = line.length >= 5 ? line.slice(5).trimStart() : "";
+            eventData += (eventData ? "\n" : "") + v;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("streaming error:", err);
+    } finally {
+      setController(null);
+    }
+  }, []);
+
+  // On mount / when props change: fetch history if we have a conversationId,
+  // extend it with messages from props, then auto-continue if last role is user.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cid = conversationIdRef.current;
+      try {
+        // If this is a new conversation (generated ID), don't fetch — just set the initial messages and exit.
+        if (isNewConversation) {
+          if (!cancelled) setMessages(initialMessages ?? []);
+          return;
+        }
+
+        let loaded: Message[] = [];
+        const res = await getConversation(cid);
+        if (!res.ok) {
+          console.warn("Failed to load conversation:", res.status, res.statusText);
+        }
+        loaded = (await res.json()).data.messages;
+
+        // Extend with messages passed via props
+        const merged = [...loaded, ...(initialMessages ?? [])];
+        if (!cancelled) setMessages(merged);
+
+        const last = merged[merged.length - 1];
+        // Only auto-continue once per conversationId
+        if (!cancelled && last && last.role === "user" && autoKickRef.current !== cid) {
+          autoKickRef.current = cid;
+          await continueConversation(merged);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        await bumpVersion();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isNewConversation, initialMessages, continueConversation, bumpVersion]);
+
   async function sendMessage(content: string) {
     if (!content.trim()) return;
+    const cid = conversationIdRef.current;
 
     const userMsg: Message = { id: uuidv4(), role: "user", content };
     setMessages((prev) => [...prev, userMsg]);
@@ -54,9 +210,10 @@ export default function Chat() {
     const ac = new AbortController();
     setController(ac);
     setPending(true);
+    setShowTyping(true);
 
     try {
-      // Build payload using current messages plus the new user message
+      // Build payload using latest messages plus the new user message
       const prevMsgs = [...messages, userMsg];
 
       const res = await fetch(`${API_URL}/api/v1/conversation`, {
@@ -67,7 +224,7 @@ export default function Chat() {
         },
         credentials: "include",
         body: JSON.stringify({
-          conversation_id: localStorage.getItem("cs-conversationid"),
+          conversation_id: cid,
           messages: prevMsgs,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
         }),
@@ -112,8 +269,9 @@ export default function Chat() {
                 m.id === obj.id ? { ...m, content: m.content + delta } : m
               );
             });
-            // ensure the typing indicator stops as soon as we get the first token
-            setPending(false);
+            // Hide typing indicator as soon as first token arrives
+            setShowTyping(false);
+            // Keep pending true until [DONE]
           }
         } catch {}
       };
@@ -160,13 +318,14 @@ export default function Chat() {
     } finally {
       setController(null);
       setInput("");
+      bumpVersion();
     }
   }
 
   return (
     <div className="flex h-full w-full flex-col">
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-hide p-4 space-y-4">
         {messages.length === 0 && (
           <div className="text-sm text-black/60">Start a conversation.</div>
         )}
@@ -175,7 +334,7 @@ export default function Chat() {
             {m.content}
           </Bubble>
         ))}
-        {pending && (
+        {pending && showTyping && (
           <Bubble role="assistant">
             <span className="inline-flex items-center gap-1">
               <Dot />
@@ -187,11 +346,10 @@ export default function Chat() {
       </div>
 
       {/* Composer */}
-      <div className="border-t border-black/10 p-3">
+      <div className="p-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            sendMessage(input);
           }}
           className="flex items-end gap-2"
         >
@@ -204,14 +362,28 @@ export default function Chat() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                sendMessage(input);
+                if (!pending) {
+                  const toSend = input;
+                  setInput("");
+                  sendMessage(toSend);
+                }
               }
             }}
-            disabled={pending}
+            onBlur={() => {
+              // keep focus on the textbox
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
           />
           {!pending ? (
             <button
-              type="submit"
+              type="button"
+              onClick={() => {
+                if (canSend) {
+                  const toSend = input;
+                  setInput("");
+                  sendMessage(toSend);
+                }
+              }}
               disabled={!canSend}
               className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white shadow transition enabled:active:scale-95 enabled:hover:opacity-90 disabled:opacity-50"
             >
@@ -238,8 +410,16 @@ function Bubble({ role, children }: { role: Role; children: React.ReactNode }) {
   const align = isUser ? "justify-end" : "justify-start";
   return (
     <div className={`flex ${align}`}>
-      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${bg}`}>
-        { typeof children === 'string' ? (<Markdown>{children}</Markdown>) : children }
+      <div className={`${role === "assistant" ? "max-w-full" : "max-w-[80%]"} rounded-2xl px-3 py-2 text-sm ${bg}`}>
+        { typeof children === 'string' ? (
+          <Markdown
+            components={{
+              code: (props: any) => <Code {...props} />,
+            }}
+          >
+            {children as string}
+          </Markdown>
+        ) : children }
       </div>
     </div>
   );

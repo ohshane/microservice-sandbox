@@ -97,7 +97,7 @@ async def set_title(db: Session, conv: M.Conversation, text: str):
 
 @app.post("/prepare")
 async def prepare(
-    body: P.ConversationPrepare,
+    body: P.Conversation,
     tokens: dict = Depends(get_tokens),
     db: Session = Depends(get_db),
 ):
@@ -117,6 +117,17 @@ async def prepare(
     db.add(conversation)
     db.commit()
     db.refresh(conversation)
+
+    user_message = M.Message(
+        parent_id=None,
+        conversation_id=conversation.id,
+        role="user",
+        content=body.messages[-1].content,
+    )
+    db.add(user_message)
+    db.commit()
+    db.refresh(user_message)
+
     return JSONResponse(
         create_response(
             "Conversation prepared successfully.",
@@ -170,16 +181,20 @@ async def completions(
         db.add(prev_conversation)
         db.commit()
         db.refresh(prev_conversation)
-
-    user_message = M.Message(
-        parent_id=prev_message.id if prev_message else None,
-        conversation_id=body.conversation_id,
-        role="user",
-        content=body.messages[-1].content,
-    )
-    db.add(user_message)
-    db.commit()
-    db.refresh(user_message)
+    
+    user_message = None
+    if prev_message and prev_message.role == "user":
+        user_message = prev_message
+    else:
+        user_message = M.Message(
+            parent_id=prev_message.id if prev_message else None,
+            conversation_id=body.conversation_id,
+            role="user",
+            content=body.messages[-1].content,
+        )
+        db.add(user_message)
+        db.commit()
+        db.refresh(user_message)
 
     if prev_conversation.title is None or prev_conversation.title == "":
         asyncio.create_task(set_title(db, prev_conversation, body.messages[-1].content))
