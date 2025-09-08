@@ -38,39 +38,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        let res;
-        try {
-          res = await getMe();
-        } catch (error) {
-          setAuth(null);
-          return;
-        }
-        if (res.status === 200) {
-          setAuth((await res.json()).data);
-          return;
-        }
-
-        try {
-          res = await refresh();
-        } catch (error) {
-          setAuth(null);
-          return;
-        }
+        let res = await getMe();
         if (res.status !== 200) {
-          setAuth(null)
-          return;
-        }
-
-        try {
+          res = await refresh();
+          if (res.status !== 200) {
+            setAuth(null);
+            return;
+          }
           res = await getMe();
-        } catch (error) {
-          setAuth(null);
-          return;
+          if (res.status !== 200) {
+            setAuth(null);
+            return;
+          }
         }
-        if (res.status === 200) {
-          setAuth((await res.json()).data);
-          return;
-        }
+        setAuth((await res.json()).data);
+      } catch (error) {
+        setAuth(null);
       } finally {
         setAuthLoading(false);
       }

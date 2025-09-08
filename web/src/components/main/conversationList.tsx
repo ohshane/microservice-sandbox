@@ -61,7 +61,7 @@ export default function ConversationList({
     >
       <ul className="space-y-1 text-sm">
         {conversations.length === 0 && !loading && !error && (
-          <li className="py-3 text-black/50">대화가 없습니다.</li>
+          <li className="py-3 text-black/50">No conversations yet.</li>
         )}
         {conversations.map((conv) => {
           const isActive = conv.id === (selectedConversationId ?? "");
@@ -71,12 +71,15 @@ export default function ConversationList({
               <button
                 type="button"
                 onClick={() => router.push(`/chat/${conv.id}`)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  router.push(`/chat/${conv.id}`);
+                }}
                 className={
                   `w-full truncate rounded-md px-3 py-2 text-left cursor-pointer ` +
                   `hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-black/20 ` +
                   (isActive ? "bg-black/5" : "")
                 }
-                aria-selected={isActive}
               >
                 {title}
               </button>

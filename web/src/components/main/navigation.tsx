@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { MessageCircle } from "lucide-react";
+import { MenuIcon, MessageCircle } from "lucide-react";
 import ConversationList from './conversationList';
 import { useRouter } from "next/navigation";
 
@@ -20,13 +20,13 @@ export default function Navigation() {
       <aside className="flex flex-col w-14 bg-white border-r border-black/10">
         {/* Chat */}
         <div
-          className="flex items-center justify-center p-3 cursor-pointer transition-transform active:scale-95"
+          className="flex items-center justify-center p-3 cursor-pointer transition-transform active:scale-95 py-4"
           onClick={() => setActiveTab((t) => (t === "chat" ? null : "chat"))}
           aria-label="Chat"
           title="Chat"
           aria-pressed={activeTab === "chat"}
         >
-          <MessageCircle className="w-5 h-5" />
+          <MenuIcon className="w-5 h-5" />
         </div>
       </aside>
 
@@ -41,7 +41,6 @@ export default function Navigation() {
             <button
               type="button"
               onClick={() => {
-                window.dispatchEvent(new Event("chat:new"));
                 router.push("/chat");
               }}
               className="w-full truncate rounded-md border border-black/10 px-3 py-2 text-left text-sm cursor-pointer hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-black/20"
