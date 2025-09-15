@@ -59,6 +59,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(root_path="/api/v1/conversation", lifespan=lifespan)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    KAFKA_BROKER_URL = os.getenv("KAFKA_BROKER_URL")
+    producer = new_kafka_producer(bootstrap_servers=[KAFKA_BROKER_URL])
+    await producer.start()
+    app.state.producer = producer
+    try:
+        yield
+    finally:
+        await producer.stop()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -138,6 +149,7 @@ async def prepare(
 
 @app.post("")
 async def completions(
+    request: Request,
     body: P.Conversation,
     tokens: dict = Depends(get_tokens),
     db: Session = Depends(get_db),
@@ -195,6 +207,13 @@ async def completions(
         db.add(user_message)
         db.commit()
         db.refresh(user_message)
+    
+    try:
+        await request.app.state.producer.send_and_wait(
+            "conversation.user.message", key=None, value=create_event(user_message.to_dict())
+        )
+    except Exception as e:
+        return JSONResponse(create_response(str(e)), 500)
 
     if prev_conversation.title is None or prev_conversation.title == "":
         asyncio.create_task(set_title(db, prev_conversation, body.messages[-1].content))
@@ -284,6 +303,14 @@ Cherry is the knowledgeable, practical, and friendly technical partner for anyon
         db.add(assistant_message)
         db.commit()
         db.refresh(assistant_message)
+
+        # Produce Kafka event after streaming response
+        try:
+            await request.app.state.producer.send_and_wait(
+                "conversation.assistant.message", key=None, value=create_event(assistant_message.to_dict())
+            )
+        except Exception as e:
+            logger.exception("Kafka production failed: %s", e)
 
     return StreamingResponse(
         stream_generator(url=url, data=data),
